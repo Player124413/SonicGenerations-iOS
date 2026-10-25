@@ -17,11 +17,24 @@ add_compile_options("-ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=sonicgenerati
 
 include(generated/rexglue.cmake)
 
+# NativeXRenderer: the native renderer (DiligentCore/Vulkan) over the game's
+# XDK Direct3D layer, added after the SDK it reuses (its CMakeLists says so).
+# The submodule's own thirdparty/diligent-core is fetched by
+#   git submodule update --init --recursive
+# (ios/build.sh and android/build.sh do it). The game's hooks and profile are
+# compiled into the executable (src/native_x_renderer_sonicgenerations.cpp):
+# hooks override the generated weak functions and must not sit in an archive.
+set(NATIVE_X_RENDERER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../native_x_renderer" CACHE PATH
+    "NativeXRenderer source tree (a submodule of this repository)")
+add_subdirectory("${NATIVE_X_RENDERER_DIR}" native_x_renderer)
+
 # The HedgeModManager mod loader (src/mods, tests/mod_loader_tests.cpp).
 add_executable(sonicgenerations
     src/main.cpp
     src/frame_rate.cpp
     src/spin_waits.cpp
+    src/native_x_renderer_profile.cpp
+    src/native_x_renderer_sonicgenerations.cpp
     src/mods/cri_utf.cpp
     src/mods/crilayla.cpp
     src/mods/cpk_overlay.cpp
@@ -29,6 +42,7 @@ add_executable(sonicgenerations
     src/mods/ini.cpp
     src/mods/mod_database.cpp
     src/mods/mod_loader.cpp)
+target_link_libraries(sonicgenerations PRIVATE native_x_renderer::native_x_renderer)
 
 # sonicgenerations_register.cpp is one flat function of function-pointer
 # registrations, run once at startup, in a single basic block. LLVM is

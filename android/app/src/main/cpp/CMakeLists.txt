@@ -65,6 +65,17 @@ endif()
 
 add_subdirectory("${REXSDK_DIR}" rexglue-sdk)
 
+# --- NativeXRenderer: the native renderer (DiligentCore/Vulkan) ------------- #
+# Over the game's XDK Direct3D layer instead of emulating the Xenos; added
+# after the SDK it reuses (its CMakeLists says so). The submodule's own
+# thirdparty/diligent-core is fetched by "git submodule update --init
+# --recursive" (android/build.sh does it). The game's hooks and profile go
+# into main (below): hooks override the generated weak functions and must not
+# sit in an archive.
+set(NATIVE_X_RENDERER_DIR "${SG_REPO_ROOT}/native_x_renderer" CACHE PATH
+    "NativeXRenderer source tree (a submodule of this repository)")
+add_subdirectory("${NATIVE_X_RENDERER_DIR}" native_x_renderer)
+
 # --- libadrenotools: custom Turnip/Adreno Vulkan driver loader ---------------
 # Ships as libadrenotools.so + its hook libs; android_main.cpp dlopen()s the
 # driver through it when the launcher has one configured. Cloned by build.sh
@@ -116,6 +127,8 @@ add_library(main SHARED
     # The portable app sources, shared with the iOS build (unchanged):
     "${SG_SHARED_APP_DIR}/frame_rate.cpp"
     "${SG_SHARED_APP_DIR}/spin_waits.cpp"
+    "${SG_SHARED_APP_DIR}/native_x_renderer_profile.cpp"
+    "${SG_SHARED_APP_DIR}/native_x_renderer_sonicgenerations.cpp"
     "${SG_SHARED_APP_DIR}/mods/cri_utf.cpp"
     "${SG_SHARED_APP_DIR}/mods/crilayla.cpp"
     "${SG_SHARED_APP_DIR}/mods/cpk_overlay.cpp"
@@ -135,7 +148,7 @@ target_compile_options(main PRIVATE -Wno-unused-variable)
 target_compile_definitions(main PRIVATE
     REXGLUE_BUILD_CONFIG="$<CONFIG>"
     REX_APP_NAME="${REX_APP_NAME}")
-target_link_libraries(main PRIVATE recomp rex::runtime rexui)
+target_link_libraries(main PRIVATE recomp rex::runtime rexui native_x_renderer::native_x_renderer)
 if(REX_HAVE_ADRENOTOOLS)
     target_compile_definitions(main PRIVATE REX_HAVE_ADRENOTOOLS=1)
     target_link_libraries(main PRIVATE adrenotools)

@@ -342,6 +342,65 @@ void GraphicsSystem::SetInterruptCallback(uint32_t callback, uint32_t user_data)
   REXGPU_INFO("SetInterruptCallback({:08X}, {:08X})", callback, user_data);
 }
 
+bool GraphicsSystem::SetDrawObserver(system::GpuDrawObserver observer, void* user) {
+  if (!command_processor_) {
+    return false;
+  }
+  command_processor_->SetDrawObserver(observer, user);
+  REXGPU_INFO("Draw observer {}", observer ? "set" : "cleared");
+  return true;
+}
+
+bool GraphicsSystem::SetHostRendering(bool enabled) {
+  if (!command_processor_) {
+    return false;
+  }
+  command_processor_->SetHostRendering(enabled);
+  REXGPU_INFO("Host rendering {}", enabled ? "on" : "off (sync only)");
+  return true;
+}
+
+bool GraphicsSystem::SetOcclusionQueryResolver(system::OcclusionQueryResolver resolver, void* user) {
+  if (!command_processor_) {
+    return false;
+  }
+  command_processor_->SetOcclusionQueryResolver(resolver, user);
+  REXGPU_INFO("Occlusion query resolver {}", resolver ? "set" : "removed");
+  return true;
+}
+
+bool GraphicsSystem::SetSignalGate(system::GpuSignalGate gate, void* user) {
+  if (!command_processor_) {
+    return false;
+  }
+  command_processor_->SetSignalGate(gate, user);
+  REXGPU_INFO("Signal gate {}", gate ? "set" : "removed");
+  return true;
+}
+
+bool GraphicsSystem::GetSwapCounts(uint64_t& issued, uint64_t& executed) {
+  issued = swaps_issued_.load(std::memory_order_acquire);
+  executed = command_processor_ ? command_processor_->swaps_executed() : 0;
+  return command_processor_ != nullptr;
+}
+
+bool GraphicsSystem::SetSwapObserver(system::GpuSwapObserver observer, void* user) {
+  if (!command_processor_) {
+    return false;
+  }
+  command_processor_->SetSwapObserver(observer, user);
+  REXGPU_INFO("Swap observer {}", observer ? "set" : "removed");
+  return true;
+}
+
+bool GraphicsSystem::GetGammaRamp(system::GammaRamp& ramp) {
+  if (!command_processor_) {
+    return false;
+  }
+  command_processor_->GetGammaRamp(ramp);
+  return true;
+}
+
 void GraphicsSystem::DispatchInterruptCallback(uint32_t source, uint32_t cpu) {
   if (!interrupt_callback_) {
     return;

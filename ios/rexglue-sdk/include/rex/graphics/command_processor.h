@@ -27,6 +27,7 @@
 #include <rex/graphics/xenos.h>
 #include <rex/memory.h>
 #include <rex/memory/ring_buffer.h>
+#include <rex/system/interfaces/graphics.h>
 #include <rex/system/xthread.h>
 #include <rex/thread.h>
 #include <rex/thread/background_gate.h>
@@ -95,6 +96,32 @@ class CommandProcessor {
 
   Shader* active_vertex_shader() const { return active_vertex_shader_; }
   Shader* active_pixel_shader() const { return active_pixel_shader_; }
+
+  // See system::IGraphicsSystem::SetDrawObserver.
+  void SetDrawObserver(system::GpuDrawObserver observer, void* user);
+
+  // See system::IGraphicsSystem::SetHostRendering.
+  void SetHostRendering(bool enabled) { host_rendering_.store(enabled, std::memory_order_relaxed); }
+  // See system::IGraphicsSystem::SetSignalGate.
+  void SetSignalGate(system::GpuSignalGate gate, void* user) {
+    signal_gate_user_ = user;
+    signal_gate_.store(gate, std::memory_order_release);
+  }
+  // See system::IGraphicsSystem::SetSwapObserver and GetSwapCounts.
+  void SetSwapObserver(system::GpuSwapObserver observer, void* user) {
+    swap_observer_user_ = user;
+    swap_observer_.store(observer, std::memory_order_release);
+  }
+  uint64_t swaps_executed() const { return swaps_executed_.load(std::memory_order_acquire); }
+
+  // See system::IGraphicsSystem::SetOcclusionQueryResolver.
+  void SetOcclusionQueryResolver(system::OcclusionQueryResolver resolver, void* user) {
+    occlusion_query_resolver_user_ = user;
+    occlusion_query_resolver_.store(resolver, std::memory_order_release);
+  }
+  // See system::IGraphicsSystem::GetGammaRamp. From any thread.
+  void GetGammaRamp(system::GammaRamp& ramp);
+  bool host_rendering() const { return host_rendering_.load(std::memory_order_relaxed); }
 
   virtual bool Initialize();
   virtual void Shutdown();
@@ -272,6 +299,30 @@ class CommandProcessor {
   uint32_t read_ptr_writeback_ptr_ = 0;
 
   std::unique_ptr<rex::thread::Event> write_ptr_index_event_;
+  // Draw observer (SetDrawObserver), and the physical address of the type-3 packet being executed,
+  // kept only while an observer is set.
+  std::atomic<system::GpuDrawObserver> draw_observer_{nullptr};
+  // Off: packets run for synchronization only (SetHostRendering).
+  std::atomic<bool> host_rendering_{true};
+  // Passed before every signal to the guest (SetSignalGate).
+  void PassSignalGate() {
+    if (auto gate = signal_gate_.load(std::memory_order_acquire)) {
+      gate(signal_gate_user_);
+    }
+  }
+  std::atomic<system::GpuSignalGate> signal_gate_{nullptr};
+  void* signal_gate_user_ = nullptr;
+  // The guest's swaps executed (PM4_XE_SWAP), and who is told of each (SetSwapObserver).
+  std::atomic<uint64_t> swaps_executed_{0};
+  std::atomic<system::GpuSwapObserver> swap_observer_{nullptr};
+  void* swap_observer_user_ = nullptr;
+
+  // Answers occlusion queries the command processor has no host query for (SetOcclusionQueryResolver).
+  std::atomic<system::OcclusionQueryResolver> occlusion_query_resolver_{nullptr};
+  void* occlusion_query_resolver_user_ = nullptr;
+  void* draw_observer_user_ = nullptr;
+  uint32_t observed_packet_address_ = 0;
+
   std::atomic<uint32_t> write_ptr_index_;
 
   // Some titles submit writes beyond the emulated register file range in PM4
@@ -303,6 +354,9 @@ class CommandProcessor {
   reg::DC_LUT_30_COLOR gamma_ramp_256_entry_table_[256] = {};
   reg::DC_LUT_PWL_DATA gamma_ramp_pwl_rgb_[128][3] = {};
   uint32_t gamma_ramp_rw_component_ = 0;
+  // Guards the two ramps' entries against GetGammaRamp on other threads; the version counts the writes.
+  std::mutex gamma_ramp_mutex_;
+  uint64_t gamma_ramp_version_ = 0;
 };
 
 }  // namespace rex::graphics

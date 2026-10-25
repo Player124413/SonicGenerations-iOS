@@ -24,6 +24,12 @@ for tool in cmake ninja python3 xcrun codesign zip; do
 done
 xcrun --sdk iphoneos --show-sdk-path >/dev/null
 
+# NativeXRenderer submodules (native_x_renderer and its DiligentCore).
+if [ ! -f "$HERE/../native_x_renderer/thirdparty/diligent-core/CMakeLists.txt" ]; then
+  git -C "$HERE/.." submodule update --init --recursive
+  echo "[ios] NativeXRenderer submodules fetched"
+fi
+
 # The executable is read from ios/game_xex/ (ignored by git, never committed).
 mkdir -p "$HERE/game_xex"
 cp "$source_xex" "$HERE/game_xex/default.xex"

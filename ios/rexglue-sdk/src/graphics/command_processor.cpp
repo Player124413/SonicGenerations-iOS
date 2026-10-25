@@ -31,6 +31,7 @@
 #include <rex/graphics/command_processor.h>
 #include <rex/graphics/flags.h>
 #include <rex/graphics/graphics_system.h>
+#include <rex/graphics/pipeline/shader/shader.h>
 #include <rex/graphics/pipeline/texture/info.h>
 #include <rex/graphics/sampler_info.h>
 #include <rex/graphics/xenos.h>
@@ -152,6 +153,19 @@ CommandProcessor::CommandProcessor(GraphicsSystem* graphics_system,
 }
 
 CommandProcessor::~CommandProcessor() = default;
+
+void CommandProcessor::GetGammaRamp(system::GammaRamp& ramp) {
+  std::lock_guard<std::mutex> gamma_ramp_lock(gamma_ramp_mutex_);
+  for (uint32_t i = 0; i < 256; ++i) {
+    ramp.table[i] = gamma_ramp_256_entry_table_[i].value;
+  }
+  for (uint32_t i = 0; i < 128; ++i) {
+    for (uint32_t j = 0; j < 3; ++j) {
+      ramp.pwl[i][j] = gamma_ramp_pwl_rgb_[i][j].value;
+    }
+  }
+  ramp.version = gamma_ramp_version_;
+}
 
 bool CommandProcessor::Initialize() {
   // Initialize the gamma ramps to their default (linear) values - taken from
@@ -293,6 +307,7 @@ void CommandProcessor::WorkerThreadMain() {
     // TODO(benvanik): use reader->Read_update_freq_ and only issue after moving
     //     that many indices.
     if (read_ptr_writeback_ptr_) {
+      PassSignalGate();
       memory::store_and_swap<uint32_t>(memory_->TranslatePhysical(read_ptr_writeback_ptr_),
                                        read_ptr_index_);
       NotifyRingProgress();
@@ -442,6 +457,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
     uint32_t scratch_reg = index - XE_GPU_REG_SCRATCH_REG0;
     if ((1 << scratch_reg) & regs.values[XE_GPU_REG_SCRATCH_UMSK]) {
       // Enabled - write to address.
+      PassSignalGate();
       uint32_t scratch_addr = regs.values[XE_GPU_REG_SCRATCH_ADDR];
       uint32_t mem_addr = scratch_addr + (scratch_reg * 4);
       memory::store_and_swap<uint32_t>(memory_->TranslatePhysical(mem_addr), value);
@@ -472,6 +488,8 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
         bool write_gamma_ramp_component = (regs[XE_GPU_REG_DC_LUT_WRITE_EN_MASK] &
                                            (UINT32_C(1) << (2 - gamma_ramp_rw_component_))) != 0;
         if (write_gamma_ramp_component) {
+          std::lock_guard<std::mutex> gamma_ramp_lock(gamma_ramp_mutex_);
+          ++gamma_ramp_version_;
           reg::DC_LUT_30_COLOR& gamma_ramp_entry =
               gamma_ramp_256_entry_table_[gamma_ramp_rw_index.rw_index];
           // Bits 0:5 are hardwired to zero.
@@ -511,6 +529,8 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
         bool write_gamma_ramp_component = (regs[XE_GPU_REG_DC_LUT_WRITE_EN_MASK] &
                                            (UINT32_C(1) << (2 - gamma_ramp_rw_component_))) != 0;
         if (write_gamma_ramp_component) {
+          std::lock_guard<std::mutex> gamma_ramp_lock(gamma_ramp_mutex_);
+          ++gamma_ramp_version_;
           reg::DC_LUT_PWL_DATA& gamma_ramp_entry =
               gamma_ramp_pwl_rgb_[gamma_ramp_rw_index_pwl][gamma_ramp_rw_component_];
           auto gamma_ramp_value = regs.Get<reg::DC_LUT_PWL_DATA>();
@@ -541,6 +561,8 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
         auto gamma_ramp_rw_index = regs.Get<reg::DC_LUT_RW_INDEX>();
         uint32_t gamma_ramp_write_enable_mask = regs[XE_GPU_REG_DC_LUT_WRITE_EN_MASK] & 0b111;
         if (gamma_ramp_write_enable_mask) {
+          std::lock_guard<std::mutex> gamma_ramp_lock(gamma_ramp_mutex_);
+          ++gamma_ramp_version_;
           reg::DC_LUT_30_COLOR& gamma_ramp_entry =
               gamma_ramp_256_entry_table_[gamma_ramp_rw_index.rw_index];
           auto gamma_ramp_value = regs.Get<reg::DC_LUT_30_COLOR>();
@@ -815,6 +837,11 @@ bool CommandProcessor::ExecutePacketType3(memory::RingBuffer* reader, uint32_t p
   uint32_t opcode = (packet >> 8) & 0x7F;
   uint32_t count = ((packet >> 16) & 0x3FFF) + 1;
   auto data_start_offset = reader->read_offset();
+  if (draw_observer_.load(std::memory_order_relaxed)) [[unlikely]] {
+    size_t header_offset = (data_start_offset + reader->capacity() - sizeof(uint32_t)) % reader->capacity();
+    observed_packet_address_ =
+        uint32_t(uintptr_t(reader->buffer()) + header_offset - uintptr_t(memory_->physical_membase()));
+  }
 
   if (reader->read_count() < count * sizeof(uint32_t)) {
     REXGPU_ERROR("ExecutePacketType3 overflow (read count {:08X}, packet count {:08X})",
@@ -842,9 +869,11 @@ bool CommandProcessor::ExecutePacketType3(memory::RingBuffer* reader, uint32_t p
       result = ExecutePacketType3_NOP(reader, packet, count);
       break;
     case PM4_INTERRUPT:
+      PassSignalGate();
       result = ExecutePacketType3_INTERRUPT(reader, packet, count);
       break;
     case PM4_XE_SWAP:
+      PassSignalGate();
       result = ExecutePacketType3_XE_SWAP(reader, packet, count);
       break;
     case PM4_INDIRECT_BUFFER:
@@ -858,24 +887,30 @@ bool CommandProcessor::ExecutePacketType3(memory::RingBuffer* reader, uint32_t p
       result = ExecutePacketType3_REG_RMW(reader, packet, count);
       break;
     case PM4_REG_TO_MEM:
+      PassSignalGate();
       result = ExecutePacketType3_REG_TO_MEM(reader, packet, count);
       break;
     case PM4_MEM_WRITE:
+      PassSignalGate();
       result = ExecutePacketType3_MEM_WRITE(reader, packet, count);
       break;
     case PM4_COND_WRITE:
+      PassSignalGate();
       result = ExecutePacketType3_COND_WRITE(reader, packet, count);
       break;
     case PM4_EVENT_WRITE:
       result = ExecutePacketType3_EVENT_WRITE(reader, packet, count);
       break;
     case PM4_EVENT_WRITE_SHD:
+      PassSignalGate();
       result = ExecutePacketType3_EVENT_WRITE_SHD(reader, packet, count);
       break;
     case PM4_EVENT_WRITE_EXT:
+      PassSignalGate();
       result = ExecutePacketType3_EVENT_WRITE_EXT(reader, packet, count);
       break;
     case PM4_EVENT_WRITE_ZPD:
+      PassSignalGate();
       result = ExecutePacketType3_EVENT_WRITE_ZPD(reader, packet, count);
       break;
     case PM4_DRAW_INDX:
@@ -1043,6 +1078,10 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(memory::RingBuffer* reader, ui
 
   ThrottlePresentation();
   IssueSwap(frontbuffer_ptr, frontbuffer_width, frontbuffer_height);
+  uint64_t swaps_executed = swaps_executed_.fetch_add(1, std::memory_order_acq_rel) + 1;
+  if (auto observer = swap_observer_.load(std::memory_order_acquire)) {
+    observer(swap_observer_user_, swaps_executed);
+  }
 
   ++counter_;
   return true;
@@ -1412,7 +1451,32 @@ bool CommandProcessor::ExecutePacketType3_EVENT_WRITE_ZPD(memory::RingBuffer* re
 
   // Occlusion queries:
   // This command is send on query begin and end.
-  // As a workaround report some fixed amount of passed samples.
+  // A resolver (SetOcclusionQueryResolver) answers the ends, for a renderer that measured the query
+  // itself.
+  if (auto resolver = occlusion_query_resolver_.load(std::memory_order_acquire)) {
+    uint32_t sample_count_address = register_file_->values[XE_GPU_REG_RB_SAMPLE_COUNT_ADDR];
+    auto* sample_counts = memory_->TranslatePhysical<xe_gpu_depth_sample_counts*>(sample_count_address);
+    uint64_t samples = 0;
+    if (sample_counts &&
+        (sample_counts->ZPass_A == kQueryFinished || sample_counts->ZPass_B == kQueryFinished ||
+         sample_counts->ZFail_A == kQueryFinished || sample_counts->ZFail_B == kQueryFinished) &&
+        resolver(occlusion_query_resolver_user_, sample_count_address, &samples)) {
+      uint32_t clamped = samples > uint64_t(UINT32_MAX) ? UINT32_MAX : uint32_t(samples);
+      sample_counts->Total_A = clamped;
+      sample_counts->Total_B = 0;
+      sample_counts->ZFail_A = 0;
+      sample_counts->ZFail_B = 0;
+      sample_counts->StencilFail_A = 0;
+      sample_counts->StencilFail_B = 0;
+      // D3D takes the query as finished as soon as ZPass_A or ZPass_B no longer holds the end marker,
+      // and then adds both: write the pair last, with one store (ZPass_A = the samples, ZPass_B = 0).
+      uint64_t zpass = clamped;
+      std::atomic_thread_fence(std::memory_order_release);
+      std::memcpy(static_cast<void*>(&sample_counts->ZPass_A), &zpass, sizeof(zpass));
+      return true;
+    }
+  }
+  // Otherwise, as a workaround, report some fixed amount of passed samples.
   auto fake_sample_count = REXCVAR_GET(query_occlusion_fake_sample_count);
   if (fake_sample_count >= 0) {
     auto* pSampleCounts = memory_->TranslatePhysical<xe_gpu_depth_sample_counts*>(
@@ -1457,6 +1521,7 @@ bool CommandProcessor::ExecutePacketType3Draw(memory::RingBuffer* reader, uint32
   WriteRegister(XE_GPU_REG_VGT_DRAW_INITIATOR, vgt_draw_initiator.value);
 
   bool draw_succeeded = true;
+  bool draw_issued = false;
   // TODO(Triang3l): Remove IndexBufferInfo and replace handling of all this
   // with PrimitiveProcessor when the old Vulkan renderer is removed.
   bool is_indexed = false;
@@ -1523,7 +1588,7 @@ bool CommandProcessor::ExecutePacketType3Draw(memory::RingBuffer* reader, uint32
   // we don't support yet.
   reader->AdvanceRead(count_remaining * sizeof(uint32_t));
 
-  if (draw_succeeded) {
+  if (draw_succeeded && host_rendering()) {
     auto viz_query = register_file_->Get<reg::PA_SC_VIZ_QUERY>();
     if (!(viz_query.viz_query_ena && viz_query.kill_pix_post_hi_z)) {
       // TODO(Triang3l): Don't drop the draw call completely if the vertex
@@ -1535,6 +1600,7 @@ bool CommandProcessor::ExecutePacketType3Draw(memory::RingBuffer* reader, uint32
           xenos::IsMajorModeExplicit(vgt_draw_initiator.major_mode, vgt_draw_initiator.prim_type);
       draw_succeeded = IssueDraw(vgt_draw_initiator.prim_type, vgt_draw_initiator.num_indices,
                                  is_indexed ? &index_buffer_info : nullptr, major_mode_explicit);
+      draw_issued = draw_succeeded;
       if (!draw_succeeded) {
         auto vgt_output_path_cntl = register_file_->Get<reg::VGT_OUTPUT_PATH_CNTL>();
         auto vgt_hos_cntl = register_file_->Get<reg::VGT_HOS_CNTL>();
@@ -1551,11 +1617,44 @@ bool CommandProcessor::ExecutePacketType3Draw(memory::RingBuffer* reader, uint32
     }
   }
 
+  if (system::GpuDrawObserver observer = draw_observer_.load(std::memory_order_acquire)) [[unlikely]] {
+    system::GpuDrawInfo info{};
+    info.packet_address = observed_packet_address_;
+    info.opcode = (packet >> 8) & 0x7F;
+    info.registers = register_file_->values;
+    info.register_count = uint32_t(RegisterFile::kRegisterCount);
+    info.bin_mask = bin_mask_;
+    info.bin_select = bin_select_;
+    info.issued = draw_issued;
+    if (const Shader* vs = active_vertex_shader_) {
+      info.vertex_shader_hash = vs->ucode_data_hash();
+      if (vs->is_ucode_analyzed()) {
+        info.vertex_shader_constants = &vs->constant_register_map();
+        info.vertex_shader_memexport = vs->memexport_eM_written();
+      }
+    }
+    if (const Shader* ps = active_pixel_shader_) {
+      info.pixel_shader_hash = ps->ucode_data_hash();
+      if (ps->is_ucode_analyzed()) {
+        info.pixel_shader_constants = &ps->constant_register_map();
+        info.pixel_shader_memexport = ps->memexport_eM_written();
+      }
+    }
+    observer(draw_observer_user_, info);
+  }
+
   // If read the packed correctly, but merely couldn't execute it (because of,
   // for instance, features not supported by the host), don't terminate command
   // buffer processing as that would leave rendering in a way more inconsistent
   // state than just a single dropped draw command.
   return true;
+}
+
+void CommandProcessor::SetDrawObserver(system::GpuDrawObserver observer, void* user) {
+  // The user pointer is published before the observer (release), and read after it (acquire).
+  draw_observer_.store(nullptr, std::memory_order_release);
+  draw_observer_user_ = user;
+  draw_observer_.store(observer, std::memory_order_release);
 }
 
 bool CommandProcessor::ExecutePacketType3_DRAW_INDX(memory::RingBuffer* reader, uint32_t packet,

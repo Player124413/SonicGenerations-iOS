@@ -14,6 +14,7 @@
 #include <rex/rex_app.h>
 #include "frame_rate.h"
 #include "mods/mod_loader.h"
+#include "native_x_renderer_profile.h"
 #if REX_PLATFORM_IOS
 #include "iso_import.h"
 #include "mod_manager_ios.h"
@@ -77,6 +78,9 @@ class SonicGenerationsApp : public rex::ReXApp {
   }
 
   void OnPostSetup() override {
+    // The native renderer registers its hooks and observer here, before the
+    // guest starts (docs/native-x-renderer-sonicgenerations.md).
+    InitNativeXRenderer();
     SetGuestFrameStats([this] { return SampleFrame(); });
   }
 
@@ -152,6 +156,9 @@ class SonicGenerationsApp : public rex::ReXApp {
   }
 
   void OnPostSetup() override {
+    // The native renderer registers its hooks and observer here, before the
+    // guest starts (docs/native-x-renderer-sonicgenerations.md).
+    InitNativeXRenderer();
     static_cast<rex::ui::SDLWindowedAppContext&>(app_context()).SetLifecycleCallback(
         [this](bool backgrounded) {
           if (backgrounded) {
@@ -234,6 +241,9 @@ class SonicGenerationsApp : public rex::ReXApp {
   }
 
   void OnPostSetup() override {
+    // The native renderer registers its hooks and observer here, before the
+    // guest starts (docs/native-x-renderer-sonicgenerations.md).
+    InitNativeXRenderer();
     // Backgrounding (home button, app switcher, screen off): pause audio, the
     // guest clock and the GPU; the session resumes where it was.
     static_cast<rex::ui::SDLWindowedAppContext&>(app_context()).SetLifecycleCallback(
@@ -425,10 +435,25 @@ class SonicGenerationsApp : public rex::ReXApp {
 #endif
   }
 
+  // NativeXRenderer: register the game's D3D map (the profile) with the
+  // native renderer before the guest starts. Must run on the UI thread: the
+  // renderer detaches the SDK's presenter from the window when it draws.
+  void InitNativeXRenderer() {
+    native_x_renderer::Initialize(sonicgenerations::NativeXRendererProfile(), runtime()->graphics_system(),
+                                  window(), cache_root());
+  }
+
   static void SetDefaults() {
     using rex::cvar::SetDefaultByName;
     // The Xenos GPU emulation; empty would disable graphics entirely.
     SetDefaultByName("gpu_plugin", "xenos");
+    // Native rendering through NativeXRenderer (DiligentCore/Vulkan), which
+    // hooks the game's XDK Direct3D layer instead of emulating the Xenos.
+    // This game's D3D library is mapped in
+    // docs/native-x-renderer-sonicgenerations.md; the Xenos plugin stays the
+    // fallback when the native renderer cannot start, and
+    // --native_x_renderer=false forces the old path.
+    SetDefaultByName("native_x_renderer", "true");
     SetDefaultByName("vulkan_log_debug_messages", "false");
     SetDefaultByName("present_letterbox", "false");
     // Some titles ask for the profile on the controller's own port and, with

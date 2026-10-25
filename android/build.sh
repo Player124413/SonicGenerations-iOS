@@ -97,6 +97,15 @@ if [ ! -f "$AT_DIR/CMakeLists.txt" ]; then
   echo "[android] libadrenotools -> $AT_DIR"
 fi
 
+# --- NativeXRenderer submodules ----------------------------------------------
+# native_x_renderer and its DiligentCore (diligent_patches are applied at
+# configure time). One shot when the tree is not there yet.
+NXR_DIR="$ROOT/native_x_renderer"
+if [ ! -f "$NXR_DIR/thirdparty/diligent-core/CMakeLists.txt" ]; then
+  git -C "$ROOT" submodule update --init --recursive
+  echo "[android] NativeXRenderer submodules fetched"
+fi
+
 # --- the APK ----------------------------------------------------------------
 if [ "$SMOKE" = 1 ] && [ ! -f "$HERE/ci-release.jks" ]; then
   # A deterministic CI keystore (the gradle build signs with it when present):
