@@ -29,32 +29,34 @@
         android:requestLegacyExternalStorage="false"
         android:theme="@style/AppTheme">
 
-        <!-- Launcher: stage game files, graphics settings, GPU driver. -->
+        <!-- Launcher: stage game files, graphics settings, GPU driver.
+             Landscape, fixed: the app never rotates under the player's hands. -->
         <activity
             android:name=".SetupActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:exported="true"
-            android:screenOrientation="fullUser">
+            android:screenOrientation="landscape">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <!-- The game (SDL3 + the recompiled code). -->
+        <!-- The game (SDL3 + the recompiled code). Landscape, fixed: nothing
+             rotates while playing. -->
         <activity
             android:name=".MainActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density"
             android:exported="false"
             android:launchMode="singleTask"
-            android:screenOrientation="sensorLandscape" />
+            android:screenOrientation="landscape" />
 
         <!-- HedgeModManager mod manager, opened over the game (MODS button). -->
         <activity
             android:name=".ModManagerActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:exported="false"
-            android:screenOrientation="fullUser"
+            android:screenOrientation="landscape"
             android:theme="@style/AppTheme" />
     </application>
 

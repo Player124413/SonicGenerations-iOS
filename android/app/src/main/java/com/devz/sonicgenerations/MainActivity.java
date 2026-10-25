@@ -102,8 +102,11 @@ public class MainActivity extends SDLActivity {
         int req;
         switch (o) {
             case "portrait": req = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT; break;
-            case "auto": req = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER; break;
-            default: req = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE;
+            // "auto": the two landscape sides only - the game never flips into
+            // portrait under the player's hands.
+            case "auto": req = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE; break;
+            // Fixed landscape (the default): no rotation at all while playing.
+            default: req = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
         }
         setRequestedOrientation(req);
     }

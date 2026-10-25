@@ -40,6 +40,17 @@ if [ ! -f "$HERE/../native_x_renderer/thirdparty/diligent-core/CMakeLists.txt" ]
   git -C "$HERE/.." submodule update --init --recursive
   echo "[ios] NativeXRenderer submodules fetched"
 fi
+# NativeXRenderer's device.cpp passes an empty window outside Windows; the
+# Android branch of the patch matters here only when the same tree is reused
+# by the Android build, but keeping both trees identically patched avoids
+# surprises. The submodule itself stays pristine.
+NXR_DIR="$HERE/../native_x_renderer"
+NXR_PATCH="$HERE/../android/patches/native_x_renderer-android-window.patch"
+if ! grep -q "NativeWindow window{native_window}" "$NXR_DIR/src/device.cpp" 2>/dev/null; then
+  patch -d "$NXR_DIR" -p1 --forward --batch < "$NXR_PATCH" \
+    || { echo "[ios] native_x_renderer patch failed" >&2; exit 1; }
+  echo "[ios] native_x_renderer: window patch applied"
+fi
 
 # The executable is read from ios/game_xex/ (ignored by git, never committed).
 if [ -n "$source_xex" ]; then

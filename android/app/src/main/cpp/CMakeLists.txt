@@ -56,7 +56,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
   add_compile_options(-O3 -DNDEBUG -fomit-frame-pointer -fno-plt
                       -fno-semantic-interposition -fmerge-all-constants
-                      -fno-stack-protector -fno-unwind-tables -fno-asynchronous-unwind-tables)
+                      -fno-stack-protector)
+  # Unwind tables stay on: they are the only way the crash reporter can walk
+  # the stack (the previous -fno-unwind-tables left crash.txt with four junk
+  # frames and no culprit). The cost is a few percent of binary size.
   if(NOT DEFINED ENV{REX_ANDROID_BASELINE_ARM})
     add_compile_options(-march=armv8.2-a+fp16+dotprod -mtune=cortex-a76)
   endif()

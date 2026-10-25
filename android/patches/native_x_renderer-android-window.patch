@@ -1,0 +1,28 @@
+NativeXRenderer: make the swap chain on the game's window work outside Windows.
+
+device.cpp's non-Windows path passes an empty NativeWindow to
+CreateSwapChainVk, so the swap chain (and with it the renderer) can never
+start on Android - NativeXRenderer is Windows-first. On Android NativeWindow
+is AndroidNativeWindow, whose one field is the ANativeWindow that
+WindowSDL::GetNativeWindowHandle() returns (the SDK's window_sdl.cpp).
+
+The submodule stays pristine: this patch is applied to its working tree at
+build time (android/build.sh, ios/build.sh), the way NativeXRenderer applies
+its own diligent_patches at configure time and the original project applies
+android/patches/rexglue-sdk-v0.10.0-*.patch.
+diff --git a/src/device.cpp b/src/device.cpp
+index a0406c9..f2aeb1a 100644
+--- a/src/device.cpp
++++ b/src/device.cpp
+@@ -104,6 +104,11 @@ bool Device::Create(void* native_window) {
+   swap_chain_desc.BufferCount = 3;
+ #ifdef _WIN32
+   Win32NativeWindow window{static_cast<HWND>(native_window)};
++#elif defined(__ANDROID__)
++  // The game's window: the SDL window's ANativeWindow, which
++  // WindowSDL::GetNativeWindowHandle() returns. The empty default below
++  // cannot make a VkSurface.
++  NativeWindow window{native_window};
+ #else
+   NativeWindow window{};
+ #endif

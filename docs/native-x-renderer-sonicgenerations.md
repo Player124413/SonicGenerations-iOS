@@ -142,6 +142,21 @@ from the trace's "from" lines (see below).
 - `native_x_renderer` defaults to **true** in `SetDefaults()` (the user wants
   the native renderer); `--native_x_renderer=false` forces the Xenos path, and
   the Xenos plugin draws if the native renderer cannot start.
+- `native_x_renderer_cvars.cpp` - forwarding accessors (decision D15) for the
+  SDK cvars the in-process SDK copy reads and the GPU plugin registers
+  (`gpu_disable_msaa`, `shared_memory_invalidation_widen_kb`,
+  `shared_memory_widen_invalidation`, `shader_no_contraction`,
+  `fsi_sample_mask_from_sample_id`); their definitions live in the plugin's
+  TU (`flags.cpp`, `command_processor.cpp`) so the settings reach it - the
+  launcher log used to say "duplicate registration ... ignored" for four of
+  them, and the plugin ran on its compiled-in defaults.
+- Android presenting: `WindowSDL::GetNativeWindowHandle()` returns the SDL
+  window's `ANativeWindow` (the SDK's `window_sdl.cpp`), and
+  `android/patches/native_x_renderer-android-window.patch` fills the
+  `NativeWindow` that `device.cpp` leaves empty outside Windows (the
+  submodule stays pristine; `android/build.sh`/`ios/build.sh` apply it to its
+  working tree). Without both, `renderer: needs the graphics system and the
+  game's window; off` - the renderer could never start on Android.
 - Build: the `native_x_renderer/` submodule is added after the SDK in both
   `ios/sonicgenerations/CMakeLists.txt` and
   `android/app/src/main/cpp/CMakeLists.txt`; `ios/build.sh`, `android/build.sh`

@@ -231,14 +231,25 @@ void WindowSDL::DestroySDLWindow() {
 }
 
 void* WindowSDL::GetNativeWindowHandle() const {
-#if REX_PLATFORM_WIN32
   if (!sdl_window_) {
     return nullptr;
   }
+#if REX_PLATFORM_WIN32
   return SDL_GetPointerProperty(SDL_GetWindowProperties(sdl_window_),
                                 SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+#elif REX_PLATFORM_ANDROID
+  // ANativeWindow*: the window a Vulkan surface is made from (Diligent's
+  // AndroidNativeWindow carries it).
+  return SDL_GetPointerProperty(SDL_GetWindowProperties(sdl_window_),
+                                SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
+#elif REX_PLATFORM_IOS
+  // UIWindow*.
+  return SDL_GetPointerProperty(SDL_GetWindowProperties(sdl_window_),
+                                SDL_PROP_WINDOW_UIKIT_WINDOW_POINTER, nullptr);
 #else
-  return nullptr;
+  // NSWindow* (macOS).
+  return SDL_GetPointerProperty(SDL_GetWindowProperties(sdl_window_),
+                                SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
 #endif
 }
 

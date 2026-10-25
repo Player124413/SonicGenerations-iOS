@@ -23,16 +23,13 @@
 #include <rex/math.h>
 #include <rex/memory.h>
 
-REXCVAR_DEFINE_INT32(shared_memory_invalidation_widen_kb, 256, "GPU",
-                     "How far, in KB, an invalidation from a CPU write to GPU-used memory may "
-                     "widen to save later write faults (aligned; up to 64 host pages). 256 KB "
-                     "matches 4 KB-page hosts; with 16 KB pages the old fixed 64 pages was 1 MB")
-    .range(0, 4096);
-REXCVAR_DEFINE_BOOL(shared_memory_widen_invalidation, true, "GPU",
-                    "On a CPU write to GPU-watched memory, invalidate up to the surrounding 256 KB "
-                    "instead of only the written pages: fewer access faults, but textures that "
-                    "share the block with per-frame CPU data are reloaded every frame.")
-    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+// The invalidation-widen settings live in flags.cpp (the GPU plugin's
+// registrations): NativeXRenderer compiles this file again (D15), and a
+// second registration would be ignored and leave the plugin without the
+// configured values. Forwarding accessors stand in for the executable's copy
+// (the game's native_x_renderer_cvars.cpp).
+REXCVAR_DECLARE(int32_t, shared_memory_invalidation_widen_kb);
+REXCVAR_DECLARE(bool, shared_memory_widen_invalidation);
 
 namespace rex::graphics {
 
@@ -103,6 +100,14 @@ void SharedMemory::ShutdownCommon() {
   system_page_flags_valid_.shrink_to_fit();
   system_page_flags_valid_and_gpu_written_.clear();
   system_page_flags_valid_and_gpu_written_.shrink_to_fit();
+  // Every flag array is sized together and must be emptied together: the
+  // readers index them as one set.
+  system_page_flags_dirty_.clear();
+  system_page_flags_dirty_.shrink_to_fit();
+  system_page_flags_used_current_.clear();
+  system_page_flags_used_current_.shrink_to_fit();
+  system_page_flags_used_previous_.clear();
+  system_page_flags_used_previous_.shrink_to_fit();
   num_system_page_flags_ = 0;
 }
 
@@ -312,20 +317,21 @@ void SharedMemory::MakeRangeValid(uint32_t start, uint32_t length, bool written_
   {
     auto global_lock = global_critical_region_.Acquire();
 
-    for (uint32_t i = valid_block_first; i <= valid_block_last; ++i) {
-      uint64_t valid_bits = UINT64_MAX;
-      if (i == valid_block_first) {
-        valid_bits &= ~((uint64_t(1) << (valid_page_first & 63)) - 1);
-      }
-      if (i == valid_block_last && (valid_page_last & 63) != 63) {
-        valid_bits &= (uint64_t(1) << ((valid_page_last & 63) + 1)) - 1;
-      }
-      system_page_flags_valid_[i] |= valid_bits;
-      if (!system_page_flags_dirty_.empty()) {
+    // The flag arrays are sized and emptied together; empty means torn down.
+    if (!system_page_flags_valid_.empty()) {
+      for (uint32_t i = valid_block_first; i <= valid_block_last; ++i) {
+        uint64_t valid_bits = UINT64_MAX;
+        if (i == valid_block_first) {
+          valid_bits &= ~((uint64_t(1) << (valid_page_first & 63)) - 1);
+        }
+        if (i == valid_block_last && (valid_page_last & 63) != 63) {
+          valid_bits &= (uint64_t(1) << ((valid_page_last & 63) + 1)) - 1;
+        }
+        system_page_flags_valid_[i] |= valid_bits;
         system_page_flags_dirty_[i] &= ~valid_bits;
+        uint64_t& gpu_written = system_page_flags_valid_and_gpu_written_[i];
+        gpu_written = written_by_gpu ? (gpu_written | valid_bits) : (gpu_written & ~valid_bits);
       }
-      uint64_t& gpu_written = system_page_flags_valid_and_gpu_written_[i];
-      gpu_written = written_by_gpu ? (gpu_written | valid_bits) : (gpu_written & ~valid_bits);
     }
   }
 
@@ -445,7 +451,9 @@ bool SharedMemory::RequestRanges(const std::pair<uint32_t, uint32_t>* ranges, si
       }
       uint32_t range_start = UINT32_MAX;
       for (uint32_t i = block_first; i <= block_last; ++i) {
-        uint64_t block_valid = system_page_flags_valid_[i];
+        // Torn down (no flags yet): treat every page as invalid - an upload
+        // is the safe answer, an out-of-bounds read is not.
+        uint64_t block_valid = i < system_page_flags_valid_.size() ? system_page_flags_valid_[i] : 0;
         // Consider pages in the block outside the requested range valid.
         if (i == block_first) {
           uint64_t block_before = (uint64_t(1) << (page_first & 63)) - 1;

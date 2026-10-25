@@ -130,6 +130,9 @@ JavaVM* QueryJavaVm() {
 //
 // @added deivid22srk, 2026 - Android port (kept by the Sonic Generations port)
 char g_crash_path[512];
+// Set by the terminate handler before it abort()s: the signal handler then
+// appends to its report instead of starting a new one.
+volatile sig_atomic_t g_terminate_reported = 0;
 
 void CrashWrite(int fd, const char* s) {
   size_t n = 0;
@@ -189,7 +192,12 @@ void CrashHandler(int sig, siginfo_t* info, void* uctx) {
   static volatile sig_atomic_t entered = 0;
   if (!entered) {
     entered = 1;
-    int fd = open(g_crash_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    // Append while an uncaught exception report is already on file:
+    // std::set_terminate (below) has already written the exception's name
+    // here before abort() brings us in, and the report must keep it - it is
+    // the only place the name survives. A plain signal starts a new file.
+    int flags = O_WRONLY | O_CREAT | O_CLOEXEC | (g_terminate_reported ? O_APPEND : O_TRUNC);
+    int fd = open(g_crash_path, flags, 0644);
     if (fd >= 0) {
       CrashWrite(fd, "Sonic Generations native crash\nsignal: ");
       const char* name = sig == SIGSEGV ? "SIGSEGV (access violation)" :
@@ -249,6 +257,7 @@ void InstallCrashReporter(const std::string& log_dir) {
         __android_log_print(ANDROID_LOG_ERROR, "sonicgenerations", "uncaught exception: %s", e.what());
         int fd = open(g_crash_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
         if (fd >= 0) { CrashWrite(fd, "uncaught exception: "); CrashWrite(fd, e.what()); CrashWrite(fd, "\n"); close(fd); }
+        g_terminate_reported = 1;
       } catch (...) {}
     }
     std::abort();

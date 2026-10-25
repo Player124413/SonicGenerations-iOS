@@ -122,6 +122,15 @@ if [ ! -f "$NXR_DIR/thirdparty/diligent-core/CMakeLists.txt" ]; then
   git -C "$ROOT" submodule update --init --recursive
   echo "[android] NativeXRenderer submodules fetched"
 fi
+# NativeXRenderer's device.cpp passes an empty window outside Windows, so the
+# renderer could never start on Android; patch the working tree (the submodule
+# itself stays pristine), like its own diligent_patches at configure time.
+NXR_PATCH="$ROOT/android/patches/native_x_renderer-android-window.patch"
+if ! grep -q "NativeWindow window{native_window}" "$NXR_DIR/src/device.cpp" 2>/dev/null; then
+  patch -d "$NXR_DIR" -p1 --forward --batch < "$NXR_PATCH" \
+    || { echo "[android] native_x_renderer patch failed" >&2; exit 1; }
+  echo "[android] native_x_renderer: Android swap chain patched in"
+fi
 
 # --- the APK ----------------------------------------------------------------
 if [ ! -f "$HERE/ci-release.jks" ]; then

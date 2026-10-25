@@ -26,45 +26,13 @@
 #include <TargetConditionals.h>
 #endif
 
-// Metal has no fragment-input coverage mask; MoltenVK synthesises
-// gl_SampleMaskIn and never reports sample 0 on iOS GPUs, so default this on
-// there. macOS Metal reports it correctly, so leave it off to avoid paying for
-// per-sample invocations.
-#if defined(__APPLE__) && TARGET_OS_IPHONE
-#define REX_FSI_SAMPLE_ID_COVERAGE_DEFAULT true
-#else
-#define REX_FSI_SAMPLE_ID_COVERAGE_DEFAULT false
-#endif
-
-// NoContraction is expanded by SPIRV-Cross into a call to an
-// [[clang::optnone]] fma() helper for every decorated operation. On Metal that
-// both defeats optimization in the hottest shaders and miscompiles: in
-// one title's terrain vertex shader the world-space Y component came out as a
-// constant while X and Z stayed exact, flattening every chunk into a sliver.
-// The reproducibility it buys is only needed for multipass rendering that
-// relies on bit-exact results between shaders, which is not worth a miscompile.
-#if defined(__APPLE__)
-#define REX_SHADER_NO_CONTRACTION_DEFAULT false
-#else
-#define REX_SHADER_NO_CONTRACTION_DEFAULT true
-#endif
-
-REXCVAR_DEFINE_BOOL(shader_no_contraction, REX_SHADER_NO_CONTRACTION_DEFAULT, "GPU/Shader",
-                    "Decorate arithmetic with NoContraction for bit-exact reproducibility across "
-                    "shaders. Must be off on Metal: SPIRV-Cross expands every decorated operation "
-                    "into an [[clang::optnone]] fma() helper, and the Metal compiler miscompiles "
-                    "the resulting shader (a vertex position component comes out constant), as "
-                    "well as losing all optimization in the hottest shaders.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-
-REXCVAR_DEFINE_BOOL(
-    fsi_sample_mask_from_sample_id, REX_FSI_SAMPLE_ID_COVERAGE_DEFAULT, "GPU/Shader",
-    "Fragment shader interlock: derive the MSAA coverage mask from gl_SampleID "
-    "with sample-rate shading instead of reading gl_SampleMaskIn. Needed on "
-    "drivers that do not report a fragment-input coverage mask correctly "
-    "(Metal/MoltenVK has no native equivalent, and drops sample 0), at the cost "
-    "of running the pixel shader once per covered sample. Defaults on for iOS.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+// The two shader settings live in flags.cpp (the GPU plugin's registrations):
+// NativeXRenderer compiles this file again (D15), and a second registration
+// would be ignored and leave the plugin without the configured values.
+// Forwarding accessors stand in for the executable's copy (the game's
+// native_x_renderer_cvars.cpp).
+REXCVAR_DECLARE(bool, shader_no_contraction);
+REXCVAR_DECLARE(bool, fsi_sample_mask_from_sample_id);
 
 namespace rex::graphics {
 
