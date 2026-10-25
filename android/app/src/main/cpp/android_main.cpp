@@ -369,10 +369,11 @@ int RunAndroidApp() {
       REXLOG_ERROR("SDLWindowedAppContext::Initialize failed: {}", SDL_GetError());
       return EXIT_FAILURE;
     }
-    const auto creator = rex::ui::WindowedApp::GetCreator(kAppIdentifier);
+    // The app's creator is linked into this library (REX_DEFINE_APP in the
+    // game project's main.cpp).
+    const auto creator = rex::ui::GetWindowedAppCreator();
     if (!creator) {
-      REXLOG_ERROR("app '{}' is not registered - recompiled code built for another name",
-                   kAppIdentifier);
+      REXLOG_ERROR("no app creator linked into {}", kAppIdentifier);
       return EXIT_FAILURE;
     }
     std::unique_ptr<rex::ui::WindowedApp> app = creator(app_context);

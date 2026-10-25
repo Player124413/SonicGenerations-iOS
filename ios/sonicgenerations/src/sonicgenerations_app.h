@@ -395,11 +395,12 @@ class SonicGenerationsApp : public rex::ReXApp {
     };
 #if REX_PLATFORM_ANDROID
     // The device's own language list, from Java's Locale (SDL queries it).
-    SDL_Locale** preferred = SDL_GetPreferredLocales();
+    int locale_count = 0;
+    SDL_Locale** preferred = SDL_GetPreferredLocales(&locale_count);
     if (!preferred) {
       return;
     }
-    for (int i = 0; preferred[i]; ++i) {
+    for (int i = 0; i < locale_count && preferred[i]; ++i) {
       if (preferred[i]->language && try_language(preferred[i]->language)) {
         break;
       }
