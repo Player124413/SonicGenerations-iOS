@@ -44,9 +44,24 @@ public final class GameFiles {
         }
     }
 
+    /**
+     * The disc names it Default.xex, and phone file systems are case-sensitive;
+     * the game's VFS ignores case, so the launcher must too. Mirrors
+     * HasDefaultXex in sonicgenerations_app.h.
+     */
+    public static File defaultXex(File root) {
+        File[] kids = root == null ? null : root.listFiles();
+        if (kids != null) {
+            for (File f : kids) {
+                if (f.isFile() && f.getName().equalsIgnoreCase("default.xex")) return f;
+            }
+        }
+        return null;
+    }
+
     public static boolean hasValidGameRoot(Context ctx) {
         String root = configuredGameRoot(ctx);
-        return root != null && new File(root, "default.xex").isFile();
+        return root != null && defaultXex(new File(root)) != null;
     }
 
     /** Title ID (8 hex chars) from a XEX2 header, or null. Mirrors extract.py. */

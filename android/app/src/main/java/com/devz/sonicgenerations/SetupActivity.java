@@ -264,10 +264,23 @@ public class SetupActivity extends Activity {
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
-        if (res != RESULT_OK || data == null || data.getData() == null) return;
+        if (res != RESULT_OK || data == null || data.getData() == null) {
+            // Backing out of the picker is not an import failure, but say so -
+            // the folder picker only confirms with "USE THIS FOLDER", and a
+            // silent return reads as "nothing happened".
+            if (req == REQ_PICK_TREE) post(getString(R.string.status_no_folder));
+            return;
+        }
         Uri uri = data.getData();
         if (req == REQ_PICK_FILE) importFile(uri);
-        else if (req == REQ_PICK_TREE) importTree(uri);
+        else if (req == REQ_PICK_TREE) {
+            // Keep the tree readable for the whole multi-GB copy even if the
+            // picker's temporary grant lapses; ignored where it is not offered.
+            try {
+                getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Exception ignored) { }
+            importTree(uri);
+        }
         else if (req == REQ_PICK_DRIVER) importDriver(uri);
     }
 
@@ -371,7 +384,12 @@ public class SetupActivity extends Activity {
             try {
                 dest.mkdirs();
                 File xex;
-                StfsExtractor.Found pkg = StfsExtractor.findInTree(getContentResolver(), tree, DocumentsContract.getTreeDocumentId(tree), 0);
+                String treeId = DocumentsContract.getTreeDocumentId(tree);
+                // An extracted disc holds default.xex at its root (the disc names
+                // it Default.xex): copy the tree over as-is and skip the package
+                // scan, which would open every file of a multi-GB dump first.
+                StfsExtractor.Found pkg = treeHasDefaultXex(tree, treeId) ? null
+                        : StfsExtractor.findInTree(getContentResolver(), tree, treeId, 0);
                 if (pkg != null && pkg.volumeType() == StfsExtractor.VOLUME_SVOD) {
                     // Games on Demand dump: <id>/<header> + <header>.data/Data0000..
                     post(getString(R.string.status_reading, pkg.name + " (Games on Demand)"));
@@ -387,7 +405,7 @@ public class SetupActivity extends Activity {
                     if (xex == null) throw new Exception(getString(R.string.err_no_xex_in_stfs, pkg.name));
                 } else {
                     long[] counter = {0};
-                    copyTree(tree, DocumentsContract.getTreeDocumentId(tree), dest, counter, 0);
+                    copyTree(tree, treeId, dest, counter, 0);
                     xex = findXex(dest, 0);
                 }
                 if (xex == null) throw new Exception(getString(R.string.err_no_xex_in_folder));
@@ -396,6 +414,21 @@ public class SetupActivity extends Activity {
                 fail(e.getMessage());
             }
         }, "import-tree").start();
+    }
+
+    /** Whether the picked tree's root already holds a default.xex (any case). */
+    private boolean treeHasDefaultXex(Uri tree, String docId) {
+        Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId);
+        try (Cursor c = getContentResolver().query(children, new String[]{
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE}, null, null, null)) {
+            while (c != null && c.moveToNext()) {
+                String name = c.getString(0);
+                if (!DocumentsContract.Document.MIME_TYPE_DIR.equals(c.getString(1)) &&
+                        name != null && name.equalsIgnoreCase("default.xex")) return true;
+            }
+        } catch (Exception ignored) { }
+        return false;
     }
 
     private void copyTree(Uri tree, String docId, File dest, long[] counter, int depth) throws Exception {
@@ -458,8 +491,10 @@ public class SetupActivity extends Activity {
     private void fail(String msg) {
         ui.post(() -> {
             setBusy(false);
-            status.setText(msg == null ? getString(R.string.err_generic) : msg);
+            // refresh() rewrites the status line, so the error goes after it -
+            // otherwise a failed import looks like "waiting for the game files".
             refresh();
+            status.setText(msg == null ? getString(R.string.err_generic) : msg);
         });
     }
 

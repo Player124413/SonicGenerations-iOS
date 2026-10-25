@@ -33,6 +33,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build
 
+      # One stable signing key across runs: the APK installs over itself on the
+      # device (android/build.sh generates android/ci-release.jks when missing).
+      - name: Keep the signing keystore across runs
+        uses: actions/cache@v4
+        with:
+          path: android/ci-release.jks
+          key: ci-release-jks-v1
+
       - name: Install Android SDK packages
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"

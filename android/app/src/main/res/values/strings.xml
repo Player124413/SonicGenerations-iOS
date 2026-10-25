@@ -9,6 +9,7 @@
     <string name="status_copying">Copying folder…</string>
     <string name="status_copied">Copied %1$d file(s)… %2$s</string>
     <string name="status_done">Game installed</string>
+    <string name="status_no_folder">No folder selected. Open the game folder and tap \"USE THIS FOLDER\" to confirm.</string>
     <string name="play">▶  Play</string>
     <string name="pick_iso">Choose ISO / XBLA package / default.xex</string>
     <string name="pick_folder">Choose folder (extracted game or Games on Demand)</string>
