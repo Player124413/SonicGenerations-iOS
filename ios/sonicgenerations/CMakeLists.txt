@@ -44,6 +44,7 @@ add_executable(sonicgenerations
     src/spin_waits.cpp
     src/native_x_renderer_profile.cpp
     src/native_x_renderer_sonicgenerations.cpp
+    src/native_x_renderer_cvars.cpp
     src/mods/cri_utf.cpp
     src/mods/crilayla.cpp
     src/mods/cpk_overlay.cpp
@@ -52,6 +53,9 @@ add_executable(sonicgenerations
     src/mods/mod_database.cpp
     src/mods/mod_loader.cpp)
 target_link_libraries(sonicgenerations PRIVATE native_x_renderer::native_x_renderer)
+# src/native_x_renderer_cvars.cpp forwards an SDK cvar through NativeXRenderer's
+# sdk_cvars.h (its src/ is not part of the public interface).
+target_include_directories(sonicgenerations PRIVATE "${NATIVE_X_RENDERER_DIR}/src")
 
 # sonicgenerations_register.cpp is one flat function of function-pointer
 # registrations, run once at startup, in a single basic block. LLVM is

@@ -138,6 +138,7 @@ add_library(main SHARED
     "${SG_SHARED_APP_DIR}/spin_waits.cpp"
     "${SG_SHARED_APP_DIR}/native_x_renderer_profile.cpp"
     "${SG_SHARED_APP_DIR}/native_x_renderer_sonicgenerations.cpp"
+    "${SG_SHARED_APP_DIR}/native_x_renderer_cvars.cpp"
     "${SG_SHARED_APP_DIR}/mods/cri_utf.cpp"
     "${SG_SHARED_APP_DIR}/mods/crilayla.cpp"
     "${SG_SHARED_APP_DIR}/mods/cpk_overlay.cpp"
@@ -152,6 +153,7 @@ add_library(main SHARED
 target_include_directories(main PRIVATE
     "${REX_PORT_DIR}" "${REX_PORT_DIR}/src" "${REX_GEN_DIR}"
     "${SG_SHARED_APP_DIR}"
+    "${NATIVE_X_RENDERER_DIR}/src"
     "${REXSDK_DIR}/include" "${REXSDK_DIR}/src/ui")
 target_compile_options(main PRIVATE -Wno-unused-variable)
 target_compile_definitions(main PRIVATE
