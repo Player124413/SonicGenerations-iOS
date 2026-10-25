@@ -79,7 +79,10 @@ elseif(UNIX)
         # bionic implements no getcontext/makecontext/swapcontext, so fibers use
         # a hand-written switch. ASM is only an enabled language on Android (see
         # REXGLUE_LANGUAGES), so the .S must not be listed for other targets.
+        # android_runtime.cpp: app-context plumbing (SetAndroidApplicationContext,
+        # ContentResolver fd bridge). @added deivid22srk, 2026 - Android port.
         target_sources(rexcore PRIVATE
+            android_runtime.cpp
             fiber_android.cpp
             fiber_aarch64.S
             filesystem_android.cpp
@@ -113,9 +116,10 @@ if(APPLE)
     target_link_libraries(rexcore PRIVATE pthread)
 elseif(ANDROID)
     # bionic folds pthread and rt into libc; there are no separate libraries to
-    # link, and asking for them fails the link outright. dl is likewise built in,
-    # but log/android are needed for the platform surfaces.
-    target_link_libraries(rexcore PRIVATE log)
+    # link, and asking for them fails the link outright. dl is a stub-capable
+    # library (dlopen/dlsym for ASharedMemory, the custom Vulkan driver and the
+    # JNI bridges); log is needed by the Android logging sink and surfaces.
+    target_link_libraries(rexcore PRIVATE dl log)
 elseif(UNIX)
     target_link_libraries(rexcore PRIVATE pthread rt dl)
 endif()

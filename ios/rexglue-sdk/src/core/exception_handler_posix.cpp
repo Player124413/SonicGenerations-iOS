@@ -419,14 +419,30 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
     }
   }
 
-  // Nobody handled it, so returning re-executes the faulting instruction and it
-  // faults again: the thread is stuck until something maps that memory, if
-  // ever. Don't let it spin a core meanwhile - on a phone that was a whole
-  // performance core lost to a dead thread. nanosleep is async-signal-safe.
-  if (signal_number == SIGSEGV || signal_number == SIGBUS) {
-    timespec delay{0, 10 * 1000 * 1000};
-    nanosleep(&delay, nullptr);
+  // Nobody claimed the fault. Returning would re-execute the faulting
+  // instruction forever; hand it to whatever handler was installed before us
+  // (the app's crash reporter, then the SEH thrower), else the default action
+  // - no spinning a core on a phone while the thread is dead.
+  struct sigaction* prev = nullptr;
+  switch (signal_number) {
+    case SIGILL: prev = &original_sigill_handler_; break;
+    case SIGSEGV: prev = &original_sigsegv_handler_; break;
+#if REX_PLATFORM_MAC
+    case SIGBUS: prev = &original_sigbus_handler_; break;
+#endif
+    default: break;
   }
+  if (prev && (prev->sa_flags & SA_SIGINFO) && prev->sa_sigaction) {
+    prev->sa_sigaction(signal_number, signal_info, signal_context);
+    return;
+  }
+  if (prev && !(prev->sa_flags & SA_SIGINFO) && prev->sa_handler != SIG_DFL &&
+      prev->sa_handler != SIG_IGN) {
+    prev->sa_handler(signal_number);
+    return;
+  }
+  signal(signal_number, SIG_DFL);
+  raise(signal_number);
 }
 
 void ExceptionHandler::Install(Handler fn, void* data) {

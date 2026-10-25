@@ -18,6 +18,7 @@
 #include <rex/cvar.h>
 #include <rex/logging.h>
 #include <rex/platform.h>
+#include <rex/ui/flags.h>
 #include <rex/ui/vulkan/instance.h>
 #include <rex/ui/vulkan/presenter.h>
 
@@ -34,7 +35,11 @@ REXCVAR_DEFINE_BOOL(vulkan_moltenvk_async_submits, false, "GPU/Vulkan",
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 #endif
 
+#if REX_PLATFORM_ANDROID
+REXCVAR_DEFINE_BOOL(vulkan_log_debug_messages, false, "UI/Vulkan", "Log Vulkan debug messages");
+#else
 REXCVAR_DEFINE_BOOL(vulkan_log_debug_messages, true, "UI/Vulkan", "Log Vulkan debug messages");
+#endif
 
 namespace rex {
 namespace ui {
@@ -141,6 +146,13 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
         &vulkan_instance->extensions_.ext_1_1_KHR_get_physical_device_properties2);
   }
   // #129.
+  // Android: the Qualcomm driver emits a VKDBGUTILWARN003 "performance" note
+  // for a large share of draw-time calls once a messenger is installed --
+  // hundreds per second, each formatted + logged on the render thread. Only
+  // request the extension when debug logging is explicitly wanted.
+#if REX_PLATFORM_ANDROID
+  if (REXCVAR_GET(vulkan_log_debug_messages) && REXCVAR_GET(vulkan_validation_enabled))
+#endif
   requested_extensions.emplace("VK_EXT_debug_utils",
                                &vulkan_instance->extensions_.ext_EXT_debug_utils);
   // #395.

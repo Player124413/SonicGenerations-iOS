@@ -20,6 +20,9 @@ namespace rex::platform {
 
 static thread_local SehThreadState tls_seh_state;
 static thread_local bool tls_seh_active = false;
+// Handlers that were installed before seh_initialize() (e.g. the Android
+// app's crash reporter); faults outside SEH regions are chained to them.
+static struct sigaction g_prev_handlers[NSIG];
 
 SehThreadState& seh_thread_state() {
   return tls_seh_state;
@@ -31,10 +34,16 @@ int seh_filter(uint32_t /*code*/, void* /*ep*/) {
 }
 
 /// Signal handler for SIGSEGV/SIGBUS/SIGFPE/SIGILL
-static void signal_handler(int sig, siginfo_t* info, void* /*ucontext*/) {
+static void signal_handler(int sig, siginfo_t* info, void* ucontext_) {
   // Only handle if we're in SEH-protected code
   if (!tls_seh_active) {
-    // Not in SEH region - restore default handler and re-raise
+    // Not in SEH region - chain to the previous handler (crash reporter),
+    // else restore the default handler and re-raise.
+    struct sigaction* prev = (sig > 0 && sig < NSIG) ? &g_prev_handlers[sig] : nullptr;
+    if (prev && (prev->sa_flags & SA_SIGINFO) && prev->sa_sigaction) {
+      prev->sa_sigaction(sig, info, ucontext_);
+      return;
+    }
     signal(sig, SIG_DFL);
     raise(sig);
     return;
@@ -110,10 +119,10 @@ void seh_initialize() {
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = SA_SIGINFO | SA_NODEFER;  // SA_NODEFER allows re-entry for nested exceptions
 
-  sigaction(SIGSEGV, &sa, nullptr);
-  sigaction(SIGBUS, &sa, nullptr);
-  sigaction(SIGFPE, &sa, nullptr);
-  sigaction(SIGILL, &sa, nullptr);
+  sigaction(SIGSEGV, &sa, &g_prev_handlers[SIGSEGV]);
+  sigaction(SIGBUS, &sa, &g_prev_handlers[SIGBUS]);
+  sigaction(SIGFPE, &sa, &g_prev_handlers[SIGFPE]);
+  sigaction(SIGILL, &sa, &g_prev_handlers[SIGILL]);
 }
 
 bool& seh_active() {

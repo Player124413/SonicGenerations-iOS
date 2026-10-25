@@ -291,7 +291,14 @@ set(SDL_INSTALL ON CACHE BOOL "" FORCE)
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON CACHE BOOL "" FORCE)
 set(SDL_TEST OFF CACHE BOOL "" FORCE)
-set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
+if(ANDROID)
+    # The Android entry point lives in SDLActivity (Java) + SDL_RunApp; the
+    # console build forces a different main contract and breaks app packaging.
+    # @added deivid22srk, 2026 - Android port support.
+    set(SDL_UNIX_CONSOLE_BUILD OFF CACHE BOOL "" FORCE)
+else()
+    set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
+endif()
 
 # Video provides the windowing/event layer; presenters create their own
 # D3D12/Vulkan surfaces from native handles, so SDL_RENDER stays off.
@@ -333,7 +340,7 @@ set(SDL_DUMMYVIDEO OFF CACHE BOOL "" FORCE)
 
 # Linux video and audio backends. Both video drivers are always built so the
 # one in use stays a runtime choice.
-if(UNIX AND NOT APPLE)
+if(UNIX AND NOT APPLE AND NOT ANDROID)
     set(SDL_X11               ON  CACHE BOOL "" FORCE)
     set(SDL_WAYLAND           ON  CACHE BOOL "" FORCE)
     set(SDL_ALSA              ON  CACHE BOOL "" FORCE)
@@ -342,6 +349,20 @@ if(UNIX AND NOT APPLE)
     set(SDL_PULSEAUDIO_SHARED ON  CACHE BOOL "" FORCE)
     set(SDL_PIPEWIRE          ON  CACHE BOOL "" FORCE)
     set(SDL_PIPEWIRE_SHARED   ON  CACHE BOOL "" FORCE)
+endif()
+if(ANDROID)
+    # Desktop backends must stay off (they would probe for X11/ALSA headers and
+    # dlopen desktop libs); Android uses the android video driver + AAudio.
+    set(SDL_X11       OFF CACHE BOOL "" FORCE)
+    set(SDL_WAYLAND   OFF CACHE BOOL "" FORCE)
+    set(SDL_ALSA      OFF CACHE BOOL "" FORCE)
+    set(SDL_PULSEAUDIO OFF CACHE BOOL "" FORCE)
+    set(SDL_PIPEWIRE  OFF CACHE BOOL "" FORCE)
+    set(SDL_JACK      OFF CACHE BOOL "" FORCE)
+    set(SDL_LIBUDEV   OFF CACHE BOOL "" FORCE)
+    set(SDL_DBUS      OFF CACHE BOOL "" FORCE)
+    set(SDL_IBUS      OFF CACHE BOOL "" FORCE)
+    set(SDL_VULKAN    ON  CACHE BOOL "" FORCE)
 endif()
 
 add_subdirectory(sdl3)

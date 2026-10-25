@@ -10,7 +10,9 @@
  */
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
+#include <unordered_map>
 #include <utility>
 
 #include <rex/assert.h>

@@ -22,6 +22,14 @@
 #include <rex/input/touch/touch_controls.h>
 #include <rex/ui/windowed_app_context_sdl.h>
 #endif
+#if REX_PLATFORM_ANDROID
+#include "mod_manager_android.h"
+#include <rex/chrono/clock.h>
+#include <rex/audio/audio_system.h>
+#include <rex/ui/windowed_app_context_sdl.h>
+
+#include <SDL3/SDL.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -37,6 +45,13 @@
 #include <rex/filesystem/devices/disc_image_device.h>
 
 #include <algorithm>
+#include <string>
+#include <utility>
+#include <vector>
+#endif
+#if REX_PLATFORM_ANDROID
+#include <rex/cvar_defaults.h>
+
 #include <string>
 #include <utility>
 #include <vector>
@@ -173,6 +188,92 @@ class SonicGenerationsApp : public rex::ReXApp {
   }
 #endif
 
+#if REX_PLATFORM_ANDROID
+  // Android: the launcher (SetupActivity) has already staged the game and
+  // written game_root.txt / settings.txt; android_main turns those into
+  // --game_data_root and friends. Everything else lives beside it in the
+  // app's external files dir (Android/data/<package>/files), reachable from
+  // any file manager or adb:
+  //
+  //   files/game/          the extracted disc (default.xex, disk/*.cpk, movie/)
+  //   files/mods/          HedgeModManager mod folders (each with mod.ini)
+  //   files/ios-mods.ini   which mods are enabled, and their order (the
+  //                        database name kept from the iOS port)
+  //   files/data/          saves and the profile
+  //   files/cache/         shader cache, merged mod archives
+  //   files/sonicgenerations.toml  settings, editable with a file manager
+  //
+  // Defaults go through SetDefaultByName: it ranks below the config file and,
+  // unlike SetFlagByName, reaches cvars owned by the GPU plugin.
+  void OnConfigurePaths(rex::PathConfig& paths) override {
+    std::error_code ec;
+    const std::filesystem::path root = paths.user_data_root.parent_path().empty()
+        ? std::filesystem::path(".")
+        : paths.user_data_root.parent_path();
+    if (paths.cache_root.empty()) {
+      paths.cache_root = root / "cache";
+    }
+    if (paths.config_path.empty()) {
+      paths.config_path = root / "sonicgenerations.toml";
+    }
+    for (const auto& dir : {paths.cache_root, paths.user_data_root}) {
+      std::filesystem::create_directories(dir, ec);
+    }
+    RunCleanupRequest(root, paths.game_data_root);
+    WriteDefaultConfig(paths.config_path);
+    SetDefaults();
+    mod_root_ = root;
+    mod_cache_ = paths.cache_root / "mods";
+    REXLOG_INFO("Android paths: game={} config={}", paths.game_data_root.string(),
+                paths.config_path.string());
+  }
+
+  void OnPreLaunchModule() override {
+    ConfigureFrameRate();
+    LoadMods();
+  }
+
+  void OnPostSetup() override {
+    // Backgrounding (home button, app switcher, screen off): pause audio, the
+    // guest clock and the GPU; the session resumes where it was.
+    static_cast<rex::ui::SDLWindowedAppContext&>(app_context()).SetLifecycleCallback(
+        [this](bool backgrounded) {
+          if (backgrounded) {
+            static_cast<rex::audio::AudioSystem*>(runtime()->audio_system())->SetBackgrounded(true);
+            rex::chrono::Clock::SetPaused(true);
+            runtime()->graphics_system()->SetBackgrounded(true);
+            REXLOG_INFO("Android: gameplay suspended; session retained");
+            rex::FlushLogging();
+          } else {
+            rex::chrono::Clock::SetPaused(false);
+            static_cast<rex::audio::AudioSystem*>(runtime()->audio_system())->SetBackgrounded(false);
+            runtime()->graphics_system()->SetBackgrounded(false);
+            has_last_frame_ = false;
+            REXLOG_INFO("Android: gameplay resumed in the existing session");
+          }
+        });
+    // The MODS button of the launcher overlay (GameModBridge.nativeModButton):
+    // the game is paused while the mod manager is open; the selection applies
+    // on the next launch. Same flow as the iOS touch controls' MODS button.
+    SgSetModMenuHandler([this] {
+      rex::chrono::Clock::SetPaused(true);
+      static_cast<rex::audio::AudioSystem*>(runtime()->audio_system())->SetBackgrounded(true);
+      SgRunModManager(mod_root_, [this] {
+        static_cast<rex::audio::AudioSystem*>(runtime()->audio_system())->SetBackgrounded(false);
+        rex::chrono::Clock::SetPaused(false);
+      }, true);
+    });
+    // "Guest: N FPS" in the F3 overlay; the SDK only shows it once an app
+    // provides frame timing.
+    SetGuestFrameStats([this] { return SampleFrame(); });
+  }
+
+  void OnShutdown() override {
+    static_cast<rex::ui::SDLWindowedAppContext&>(app_context()).SetLifecycleCallback({});
+    SgSetModMenuHandler(nullptr);
+  }
+#endif
+
  private:
   // The VFS is mounted and the game has not opened anything yet.
   void LoadMods() {
@@ -188,8 +289,8 @@ class SonicGenerationsApp : public rex::ReXApp {
   std::filesystem::path mod_root_;
   std::filesystem::path mod_cache_;
 
-#if REX_PLATFORM_IOS
-  // The disc names it Default.xex, and the phone's file system is
+#if REX_PLATFORM_IOS || REX_PLATFORM_ANDROID
+  // The disc names it Default.xex, and phone file systems are
   // case-sensitive; the VFS itself ignores case.
   static bool HasDefaultXex(const std::filesystem::path& dir) {
     std::error_code ec;
@@ -244,8 +345,8 @@ class SonicGenerationsApp : public rex::ReXApp {
 
 #endif
 
-#if REX_PLATFORM_MAC
-#if REX_PLATFORM_IOS
+#if REX_PLATFORM_MAC || REX_PLATFORM_ANDROID
+#if REX_PLATFORM_IOS || REX_PLATFORM_ANDROID
   static void WriteDefaultConfig(const std::filesystem::path& path) {
     if (std::filesystem::exists(path)) {
       return;
@@ -254,7 +355,8 @@ class SonicGenerationsApp : public rex::ReXApp {
     if (!out) {
       return;
     }
-    out << "# Sonic Generations settings. Edit in the Files app; takes effect on relaunch.\n"
+    out << "# Sonic Generations settings. Edit with a file manager (the Files app\n"
+           "# on iOS); takes effect on relaunch.\n"
            "gpu_plugin = \"xenos\"\n"
            "\n"
            "# The game renders 16:9 and the panel is wider.\n"
@@ -280,6 +382,30 @@ class SonicGenerationsApp : public rex::ReXApp {
     static const std::pair<const char*, int> kLanguages[] = {
         {"en", 1}, {"ja", 2}, {"de", 3}, {"fr", 4}, {"es", 5}, {"it", 6},
     };
+    const auto try_language = [&](const char* code) {
+      const std::string two(code, std::min<size_t>(2, code ? std::strlen(code) : 0));
+      const auto match = std::find_if(std::begin(kLanguages), std::end(kLanguages),
+                                      [&](const auto& entry) { return two == entry.first; });
+      if (match != std::end(kLanguages)) {
+        rex::cvar::SetDefaultByName("user_language", std::to_string(match->second));
+        REXLOG_INFO("Game language: {} (user_language {})", match->first, match->second);
+        return true;
+      }
+      return false;
+    };
+#if REX_PLATFORM_ANDROID
+    // The device's own language list, from Java's Locale (SDL queries it).
+    SDL_Locale** preferred = SDL_GetPreferredLocales();
+    if (!preferred) {
+      return;
+    }
+    for (int i = 0; preferred[i]; ++i) {
+      if (preferred[i]->language && try_language(preferred[i]->language)) {
+        break;
+      }
+    }
+    SDL_free(preferred);
+#else  // REX_PLATFORM_MAC
     CFArrayRef preferred = CFLocaleCopyPreferredLanguages();
     if (!preferred) {
       return;
@@ -290,16 +416,12 @@ class SonicGenerationsApp : public rex::ReXApp {
       if (!CFStringGetCString(language, code, sizeof(code), kCFStringEncodingUTF8)) {
         continue;
       }
-      const std::string two(code, std::min<size_t>(2, std::strlen(code)));
-      const auto match = std::find_if(std::begin(kLanguages), std::end(kLanguages),
-                                      [&](const auto& entry) { return two == entry.first; });
-      if (match != std::end(kLanguages)) {
-        rex::cvar::SetDefaultByName("user_language", std::to_string(match->second));
-        REXLOG_INFO("Game language: {} (user_language {})", match->first, match->second);
+      if (try_language(code)) {
         break;
       }
     }
     CFRelease(preferred);
+#endif
   }
 
   static void SetDefaults() {
@@ -316,9 +438,10 @@ class SonicGenerationsApp : public rex::ReXApp {
     // recompiler did not see instead of aborting; each target is logged once.
     SetDefaultByName("tolerant_indirect_calls", "true");
 
-    // MoltenVK has no fragment-input coverage mask, and emulating the EDRAM in
-    // the pixel shader is slow on this GPU: host render targets let the
-    // hardware do coverage and blending.
+    // Mobile tile-based GPUs (Apple's TBDR, Adreno/Mali) have no cheap
+    // fragment-input coverage mask in MoltenVK, and emulating the EDRAM in the
+    // pixel shader is slow there: host render targets let the hardware do
+    // coverage and blending.
     SetDefaultByName("fsi_sample_mask_from_sample_id", "true");
     SetDefaultByName("render_target_path_vulkan", "fbo");
 
@@ -334,15 +457,18 @@ class SonicGenerationsApp : public rex::ReXApp {
     SetDefaultByName("vulkan_allow_present_mode_mailbox", "false");
     SetDefaultByName("vulkan_allow_present_mode_fifo_relaxed", "false");
     SetDefaultByName("framerate_limit", "60");
-#if REX_PLATFORM_IOS
+#if REX_PLATFORM_IOS || REX_PLATFORM_ANDROID
+    // The game's own presentation interval is two vblanks (30 FPS); the
+    // SgPresentationInterval hook (frame_rate.cpp) drives the real rate, so
+    // the guest vblank matches the 60 FPS goal and the clock does not rescale.
     SetDefaultByName("guest_vblank_rate", "60");
     SetDefaultByName("clock_no_scaling", "false");
 #endif
     // Clear rectangles drawn with Direct3D's unbounded 8192 scissor: find their
     // real extent by running the vertex shader on the CPU, as Xenia does.
     SetDefaultByName("execute_unclipped_draw_vs_on_cpu", "true");
-    // Apple's tile-based GPU loads and stores the whole render area of every
-    // render pass: upload rewritten guest pages between passes, and size the
+    // Tile-based GPUs load and store the whole render area of every render
+    // pass: upload rewritten guest pages between passes, and size the
     // passes to what their draws write.
     SetDefaultByName("vulkan_batch_dirty_uploads", "true");
     SetDefaultByName("vulkan_tight_render_area", "true");

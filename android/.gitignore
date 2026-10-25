@@ -1,0 +1,10 @@
+# Build inputs and outputs (generated per machine, never committed).
+game_xex/
+sdk/
+out/
+app/build/
+app/src/main/java/org/libsdl/
+.gradle/
+local.properties
+ci-release.jks
+sonicgenerations/generated/

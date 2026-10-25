@@ -5,14 +5,12 @@
  * @license     BSD 3-Clause License
  *
  * @remarks     Inherited from Xenia, whose Android build resolved content://
- *              URIs through JNI (ContentResolver.openFileDescriptor). ReXGlue
- *              has no JNI bridge, so content URIs are reported as unsupported
- *              and callers fall back to ordinary paths --
- *              MappedMemory::OpenForAndroidContentUri already returns nullptr on
- *              a negative descriptor. Ordinary filesystem access is unaffected:
- *              it goes through filesystem_posix.cpp like every other POSIX
- *              target. Wire a JNI bridge here if the app is ever handed content
- *              URIs (e.g. a document picker) rather than plain paths.
+ *              URIs through JNI (ContentResolver.openFileDescriptor). The JNI
+ *              bridge now lives in android_runtime.cpp: the app glue hands us
+ *              its Activity via rex::SetAndroidApplicationContext() and
+ *              content URIs open through its ContentResolver. Ordinary
+ *              filesystem access is unaffected: it goes through
+ *              filesystem_posix.cpp like every other POSIX target.
  */
 
 #include <rex/platform.h>
@@ -20,6 +18,7 @@
 
 #include <rex/filesystem.h>
 #include <rex/logging.h>
+#include <rex/main_android.h>
 
 namespace rex {
 namespace filesystem {
@@ -35,10 +34,14 @@ bool IsAndroidContentUri(const std::string_view source) {
 }
 
 int OpenAndroidContentFileDescriptor(const std::string_view uri, const char* mode) {
-  (void)mode;
-  REXLOG_ERROR("content:// URIs need a JNI ContentResolver bridge, which this build does not have: {}",
-               uri);
-  return -1;
+  // Wired to the app's ContentResolver bridge (android_runtime.cpp); the app
+  // glue must have called rex::SetAndroidApplicationContext() first. Returns
+  // -1 (and callers fall back to ordinary paths) when it is not available.
+  const int fd = rex::OpenContentUriFdJavaBridge(uri, mode);
+  if (fd < 0) {
+    REXLOG_ERROR("content:// open failed (no app context, or the resolver refused it): {}", uri);
+  }
+  return fd;
 }
 
 }  // namespace filesystem

@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -167,6 +168,19 @@ X_STATUS GraphicsSystem::SetupGuestGpu(runtime::FunctionDispatcher* function_dis
         double refresh_rate_hz = std::max(1.0, double(float(video_mode.refresh_rate)));
         if (REXCVAR_GET(guest_vblank_rate) > 0) {
           refresh_rate_hz = double(REXCVAR_GET(guest_vblank_rate));  // EXPERIMENT
+        }
+        // REX_FPS_CAP=<hz>: run the guest vblank at a lower rate than the video
+        // mode reports. Titles pace themselves on vblank, so this is a real
+        // frame-rate cap that also halves GPU work -- the difference between
+        // a phone throttling after five minutes and holding a steady 30.
+        // Applied after guest_vblank_rate and only when it lowers the rate, so
+        // the runtime setting wins when it is already the stricter of the two.
+        if (const char* cap = std::getenv("REX_FPS_CAP")) {
+          double cap_hz = std::atof(cap);
+          if (cap_hz >= 10.0 && cap_hz < refresh_rate_hz) {
+            REXLOG_INFO("vblank rate capped at {} Hz (REX_FPS_CAP)", cap_hz);
+            refresh_rate_hz = cap_hz;
+          }
         }
         uint64_t guest_tick_frequency = chrono::Clock::guest_tick_frequency();
         uint64_t vsync_interval_ticks =
