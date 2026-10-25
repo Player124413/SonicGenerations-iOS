@@ -23,7 +23,7 @@ public final class PerfManager {
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static PowerManager sPower;
     private static PowerManager.OnThermalStatusChangedListener sThermal;
-    private static android.os.GameManager sGameManager;
+    private static android.app.GameManager sGameManager;
     private static int sLastStatus = PowerManager.THERMAL_STATUS_NONE;
 
     private PerfManager() {
@@ -48,9 +48,10 @@ public final class PerfManager {
         });
         if (Build.VERSION.SDK_INT >= 33) {
             try {
-                sGameManager = (android.os.GameManager) activity.getSystemService(Activity.GAME_SERVICE);
+                sGameManager = (android.app.GameManager) activity.getSystemService(Activity.GAME_SERVICE);
                 if (sGameManager != null) {
-                    sGameManager.setGameMode(android.os.GameManager.MODE_PERFORMANCE);
+                    sGameManager.setGameMode(activity.getPackageName(),
+                            android.app.GameManager.GAME_MODE_PERFORMANCE);
                 }
             } catch (Throwable ignored) {
             }
@@ -71,7 +72,8 @@ public final class PerfManager {
     public static void onActivityResumed(Activity activity) {
         if (sGameManager != null) {
             try {
-                sGameManager.setGameMode(android.os.GameManager.MODE_PERFORMANCE);
+                sGameManager.setGameMode(activity.getPackageName(),
+                        android.app.GameManager.GAME_MODE_PERFORMANCE);
             } catch (Throwable ignored) {
             }
         }
