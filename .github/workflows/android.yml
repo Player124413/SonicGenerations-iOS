@@ -41,7 +41,23 @@ jobs:
             "ndk;27.2.12479018" "cmake;3.31.1"
 
       - name: Build the APK (smoke, without game content)
-        run: bash android/build.sh --smoke
+        run: |
+          set -o pipefail
+          bash android/build.sh --smoke 2>&1 | tee /tmp/build.log
+
+      # The run log lives on a CDN; surface the failure where the Checks API
+      # can see it: the step summary and error annotations.
+      - name: Show the failure
+        if: failure()
+        run: |
+          {
+            echo "### Build failed - tail of the log"
+            echo '```'
+            tail -n 80 /tmp/build.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -nE "^FAILURE:|error:|Error:|What went wrong|Caused by:|Execution failed|cannot find symbol|Unresolved|FATAL" /tmp/build.log \
+            | tail -40 | while IFS= read -r line; do echo "::error::$line"; done || true
 
       - name: Upload the APK
         uses: actions/upload-artifact@v4
