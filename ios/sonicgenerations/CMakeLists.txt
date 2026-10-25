@@ -24,6 +24,12 @@ include(generated/rexglue.cmake)
 # (ios/build.sh and android/build.sh do it). The game's hooks and profile are
 # compiled into the executable (src/native_x_renderer_sonicgenerations.cpp):
 # hooks override the generated weak functions and must not sit in an archive.
+#
+# No DLSS here: Diligent's SuperResolution module needs NVIDIA's NGX (a
+# Windows runtime) and its factory types are incomplete without it. A normal
+# set() shadows the cache entry native_x_renderer forces to OFF (CMP0126 keeps
+# the binding), and Diligent then skips the module.
+set(DILIGENT_NO_SUPER_RESOLUTION ON)
 set(NATIVE_X_RENDERER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../native_x_renderer" CACHE PATH
     "NativeXRenderer source tree (a submodule of this repository)")
 add_subdirectory("${NATIVE_X_RENDERER_DIR}" native_x_renderer)

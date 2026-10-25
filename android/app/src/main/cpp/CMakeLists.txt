@@ -72,6 +72,12 @@ add_subdirectory("${REXSDK_DIR}" rexglue-sdk)
 # --recursive" (android/build.sh does it). The game's hooks and profile go
 # into main (below): hooks override the generated weak functions and must not
 # sit in an archive.
+#
+# No DLSS here: Diligent's SuperResolution module needs NVIDIA's NGX (a
+# Windows runtime) and its factory types are incomplete without it. A normal
+# set() shadows the cache entry native_x_renderer forces to OFF (CMP0126 keeps
+# the binding), and Diligent then skips the module.
+set(DILIGENT_NO_SUPER_RESOLUTION ON)
 set(NATIVE_X_RENDERER_DIR "${SG_REPO_ROOT}/native_x_renderer" CACHE PATH
     "NativeXRenderer source tree (a submodule of this repository)")
 add_subdirectory("${NATIVE_X_RENDERER_DIR}" native_x_renderer)
