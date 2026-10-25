@@ -53,8 +53,11 @@ Hooked in `src/native_x_renderer_sonicgenerations.cpp`. Evidence in brackets.
 | Frame | Swap | `82DC43F0` | 120 ins; converts the present interval at `+13984` to a vblank count (the SgPresentationInterval 60 FPS hook sits inside it at `0x82DC44E0`), reads `+12260`, drives the swap |
 | Frame | Present | `82DC48B0` | 474 ins; runs the copy draw (`82DC3D60`, its pixel constants at `+6016`) and the swap counters; ends the frame (kFrameEnd); engine `0x82E29CB0` |
 
-Not hooked yet: SetStreamSource (the setters write fetch constants computed
-from the stream/sampler, so the entry writes no static field), TextureUnlock,
+Not hooked yet: SetStreamSource (the engine calls the fetch-patch pair
+`82DA9E60`/`82DAA008` - 3-arg helpers that set the stride/format of the
+stream's fetch constant `(stream+48)*24` and dirty its bit, reading the
+per-stream byte tables at `+10864`/`+10890`; where the buffer address enters
+the fetch is to find, so the hook waits for the trace), TextureUnlock,
 FlushCpuRange, QueryIssue and QueryGetData (the query machinery at
 `+13600`/`+13720`), and the samplers' render-state table (~90 setters at
 `0x82DA85C0`–`0x82DA9E10`, named by rs_setters: RB_BLEND*, RB_DEPTHCONTROL,
@@ -73,7 +76,7 @@ the setters, the tiling/clear/swap paths). The head matches Dante's Inferno
 | Field | Offset | Evidence |
 |---|---|---|
 | Dirty masks (u64 x 6) | `+0`…`+40` | The draw flushes load +0/+8/+16/+24/+32 (+40 in the clears); VS in +0, PS in +8 (the constant setters), fetch in +24 (the fourth, POTCAWE's order) |
-| Fetch dirty bit 0 | bit 31 | The POTCAWE order (slot s = bit 31-s); confirm in the fetch flush |
+| Fetch dirty bit 0 | bit 31 | The fetch flush (`82DA9E60` family): `addi r4,r4,32` then `srd` from bit 63 - the stream's slot is its fetch constant (`(stream + 48) * 24 = +1152 + stream * 24`) and slot s is bit 31-s |
 | Command buffer write / limit / kick | `+48` / `+52` / `+56` | Every packet writer: `lwz +56`, `lwz +48`, `stwu`, `stw +48`. The write pointer holds the **last dword written** (stwu pre-increment) |
 | Fetch constants | `+1152` | The Present copy writes a fetch constant at `+1152` (stw); Dante's offset |
 | VS float constants | `+1920` | Dante's offset |
@@ -103,6 +106,7 @@ the setters, the tiling/clear/swap paths). The head matches Dante's Inferno
 | D3DRS_PRESENTINTERVAL | `+13984` | Swap converts it to a vblank count (the 60 FPS hook at `0x82DC44E0`) |
 | Swap/vblank state | `+12260`, `+13912`/`+13916`, `+15300`… | Swap/Present counters |
 | Prebuilt draws | `+24376`, `+24384`/`+24388`/`+24392` | SetShaderGPRAllocation's one-point draws |
+| Per-stream fetch stride/format bytes | `+10864 + stream`, `+10890 + stream` | The fetch-patch pair reads them (`82DA9E60` family) |
 
 Still to place: the vertex-buffer array, the texture object array and the
 sampler filter state (the setters write fetch constants computed from the
