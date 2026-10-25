@@ -6,12 +6,13 @@
 // Hooks run the original function either way: when no NativeXRenderer feature
 // is on, a hook is one branch plus the call.
 //
-// Still to hook (mapped or not yet found): SetViewport, SetScissorRect,
-// SetStreamSource, SetIndices, SetTexture, the buffer locks/unlocks,
-// TextureUnlock, FlushCpuRange, NewSegment, SetPredication, QueryIssue and
-// QueryGetData. Missing hooks show up in the trace as calls or draw packets
-// "written outside any hooked call" - never add an address that is not a
-// function entry.
+// Still to hook (mapped or not yet found): SetStreamSource (the setters write
+// fetch constants computed from the stream), TextureUnlock, FlushCpuRange,
+// SetPredication (candidate 82DB0D38 turned out to be the device Release),
+// QueryIssue and QueryGetData (the query machinery at +13600/+13720).
+// Missing hooks show up in the trace as calls or draw packets "written
+// outside any hooked call" - never add an address that is not a function
+// entry.
 
 #include <native_x_renderer/hooks.h>
 
@@ -41,6 +42,13 @@ NATIVE_X_RENDERER_HOOK(82DA79A8, BeginIndexedVertices)
 // RB_DEPTHCONTROL. Both read the render target pointers at +12792.
 NATIVE_X_RENDERER_HOOK(82DAB320, SetRenderTarget)
 NATIVE_X_RENDERER_HOOK(82DAB6B0, SetDepthStencilSurface)
+// SetViewport reads the D3DVIEWPORT (int x, y, w, h + float min/max z from
+// r4) and stores the device's float viewport at +13000 through 82DAAF88;
+// SetScissorRect is the library-internal apply (GRAW's case) that writes the
+// scissor quad at +13028 and the PA_SC scissor registers, called from the
+// engine's setter (0x82E254D8) as well as from the clears and tiling.
+NATIVE_X_RENDERER_HOOK(82DAB1F0, SetViewport)
+NATIVE_X_RENDERER_HOOK(82DAA888, SetScissorRect)
 // Clear (count, rects, flags, D3DCOLOR, Z, stencil) and ClearF (flags, rect,
 // float4*, Z, stencil - f1 carries Z): both save the clear into the +13532
 // block and drive the library's own clear draws (sub_82DAF7E0's IM_LOAD_IMM +
@@ -75,10 +83,26 @@ NATIVE_X_RENDERER_HOOK(82DB1C08, SetPixelShaderConstantF)
 // +24384/+24388).
 NATIVE_X_RENDERER_HOOK(82DB11C0, SetShaderGPRAllocation)
 
+// Resources. SetTexture copies the texture's fetch constant (object +28) into
+// the sampler's register; SetIndices writes +12788 and stamps the fence
+// (from +11036) into the unbound buffer's +8, the resource-fence pattern of
+// the table. The Lock/Unlock pairs wait on the buffer's fence (object +24/+28
+// its base and size) and flush its CPU range: the pairs are certain by their
+// matching call-site sets (17 and 12); which pair is the vertex one is to
+// confirm in the trace.
+NATIVE_X_RENDERER_HOOK(82DABA20, SetTexture)
+NATIVE_X_RENDERER_HOOK(82DAAB08, SetIndices)
+NATIVE_X_RENDERER_HOOK(82DB0828, VertexBufferLock)
+NATIVE_X_RENDERER_HOOK(82DAF710, VertexBufferUnlock)
+NATIVE_X_RENDERER_HOOK(82DB0878, IndexBufferLock)
+NATIVE_X_RENDERER_HOOK(82DAF7D0, IndexBufferUnlock)
+
 // Command buffer segments. Kick (sub_82DB47C8, 65 ins) is what every packet
 // writer calls when the write pointer passes the limit: the observer follows
-// a call's packets into the new segment through it.
+// a call's packets into the new segment through it. NewSegment writes the
+// 1480-dword segment header, stamps the fence and spins on +11152.
 NATIVE_X_RENDERER_HOOK(82DB47C8, KickSegment)
+NATIVE_X_RENDERER_HOOK(82DB4A80, NewSegment)
 
 // Frame. Swap ends the vblank wait (our SgPresentationInterval frame-rate
 // hook lives inside it, at 0x82DC44E0) and Present runs the copy draw

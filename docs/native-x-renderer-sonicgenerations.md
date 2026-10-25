@@ -36,27 +36,33 @@ Hooked in `src/native_x_renderer_sonicgenerations.cpp`. Evidence in brackets.
 | Targets | BeginZPass | `82DAC750` | 139 ins; sets `+13072`, tests `+11068` bit 26, runs the query machinery at `+13744`; engine `0x82E25F60` |
 | Targets | EndZPass | `82DACF00` | 164 ins; reads the fence at `+11024`, flushes the `+13600`/`+13720` blocks; engine `0x82E26000` |
 | Targets | Resolve | `82DC1860` | 19-ins entry over the 1109-ins RB_COPY_* writer (`82DC0708`); 11 engine call sites (`0x82E24DF8`, `0x82E29630`, `0x82E29CB0`, `0x8321B810`, `0x8321F820`) |
+| Targets | SetViewport | `82DAB1F0` | 32 ins; reads the D3DVIEWPORT from r4 (int x, y, w, h + float min/max z), converts to the float viewport at `+13000` through `82DAAF88`; engine `0x82E27350`, `0x82E254D8` |
+| Targets | SetScissorRect | `82DAA888` | 62 ins; the library-internal apply (GRAW's case): writes the scissor quad at `+13028` and the PA_SC scissor registers (`0x2011`/`0x2012`); the engine calls it from `0x82E254D8`, and the clears/tiling/Present copy internally |
 | Shaders | SetVertexShader | `82DB1F20` | 115 ins; writes the shader pointer at `+13048` and the +0/+16/+32 masks; the program flush reads it back (`+13048`) |
 | Shaders | SetPixelShader | `82DB1D18` | 111 ins; writes `+13044` and the +8/+16/+32 masks; the program flush reads it back |
 | Shaders | SetVertexDeclaration | `82DB2138` | 5 ins; writes `+12216` and the +16 mask |
 | Constants | SetVertexShaderConstantF | `82DB1B30` | 54 ins; writes the +0 mask (VS constants dirty); engine `0x83219B48` |
 | Constants | SetPixelShaderConstantF | `82DB1C08` | 54 ins; writes the +8 mask; engine `0x8321AB30` |
 | Misc | SetShaderGPRAllocation | `82DB11C0` | 53 ins; writes `+24376` and runs the prebuilt one-point draws (`82DC3178`/`82DC3690`, allocator `+24384`/`+24388`) |
+| Resources | SetTexture | `82DABA20` | 57 ins; (sampler, texture): copies the texture's fetch constant (object `+28`..`+52`) into the sampler's register, kicks if needed; engine `0x82E27350`, `0x82E254D8` |
+| Resources | SetIndices | `82DAAB08` | 36 ins; writes the index buffer pointer at `+12788` and stamps the fence (from the block `+11036` points to) into the unbound buffer's `+8`; 10 engine call sites |
+| Resources | Vertex buffer Lock / Unlock | `82DB0828` / `82DAF710` | Lock: 20 ins, waits on the buffer's fence through `82DB04B8` (base/size at object `+24`/`+28`); Unlock: 4 ins tail-call flushing the CPU range (`82DAF300`); 17 call sites each |
+| Resources | Index buffer Lock / Unlock | `82DB0878` / `82DAF7D0` | The same pair with the other fence command (12 call sites each); which pair is the vertex one is to confirm in the trace |
 | Sync | KickSegment | `82DB47C8` | 65 ins; what every packet writer calls when the write pointer passes the limit (lwz +56 / lwz +48); stamps the segment from `+11024` |
+| Sync | NewSegment | `82DB4A80` | 30 ins; writes the 1480-dword segment header, stamps the fence (through `82DB3388`) and spins on `+11152` |
 | Frame | Swap | `82DC43F0` | 120 ins; converts the present interval at `+13984` to a vblank count (the SgPresentationInterval 60 FPS hook sits inside it at `0x82DC44E0`), reads `+12260`, drives the swap |
 | Frame | Present | `82DC48B0` | 474 ins; runs the copy draw (`82DC3D60`, its pixel constants at `+6016`) and the swap counters; ends the frame (kFrameEnd); engine `0x82E29CB0` |
 
-Not hooked yet (mapped or still to find): SetViewport, SetScissorRect,
-SetStreamSource, SetIndices (candidate `82DAAB08`, writes `+12788`), SetTexture,
-VertexBufferLock/Unlock (candidates `82DAD190`/`82DAD3B0`, object fields
-+0..+180), IndexBufferLock/Unlock, TextureUnlock, FlushCpuRange, NewSegment
-(candidates `82DB4A80`, `82DB7B78`), SetPredication (candidate `82DB0D38`,
-writes the flag byte `+11072`), QueryIssue/QueryGetData (the query machinery
-at `+13600`/`+13720`), and the samplers' render-state table (~90 setters at
+Not hooked yet: SetStreamSource (the setters write fetch constants computed
+from the stream/sampler, so the entry writes no static field), TextureUnlock,
+FlushCpuRange, QueryIssue and QueryGetData (the query machinery at
+`+13600`/`+13720`), and the samplers' render-state table (~90 setters at
 `0x82DA85C0`–`0x82DA9E10`, named by rs_setters: RB_BLEND*, RB_DEPTHCONTROL,
 RB_COLOR_MASK, PA_SU_*, SQ_WRAPPING_*, ... - the observer reads the shadow
-they write, so they need no hooks). A missing hook shows up in the trace as a
-call or packets "written outside any hooked call".
+they write, so they need no hooks). `82DB0D38`, a SetPredication candidate,
+turned out to be the device's Release (atomic decrement of the refcount at
+`+60`). A missing hook shows up in the trace as a call or packets "written
+outside any hooked call".
 
 ## The device layout
 
@@ -87,7 +93,8 @@ the setters, the tiling/clear/swap paths). The head matches Dante's Inferno
 | Index buffer | `+12788` | Written next to the targets (POTCAWE's adjacency pattern); SetIndices candidate writes it |
 | Render targets RT0-3 | `+12792`…`+12804` | Read interleaved with their companions at `+13080`… by the tiling/resolve/clear paths |
 | Depth stencil | `+12808` | Same reads |
-| Viewport | `+13000` | The draw flushes read lfs+13000..+13012 (x, y, w, h floats); +13016/+13020 = min/max z |
+| Viewport | `+13000` | The draw flushes read lfs+13000..+13012 (x, y, w, h floats); +13016/+13020 = min/max z; SetViewport writes them through a computed store |
+| Scissor | `+13028`…`+13040` | SetScissorRect's apply writes the TL/BR quad (4 dwords); the draws read +13028..+13040 with the shaders |
 | Pixel shader | `+13044` | SetPixelShader writes it; the program flush reads it |
 | Vertex shader | `+13048` | SetVertexShader writes it; the program flush reads it |
 | Predication mask | `+13052` | Next to the shaders, written with the predication flag (confirm with SetPredication) |
@@ -109,6 +116,7 @@ stream/sampler, so the arrays first show up in the trace's argument dumps).
 | Surface RB_SURFACE_INFO / RB_COLOR-DEPTH_INFO | `+24` / `+28` | The GetDesc-style getters read +24/+28 (`82DA6C98` and friends) |
 | Surface size (w-1, h-1) | `+36`, bits 18-31 / 3-17 | POTCAWE's packing |
 | Vertex/index buffer base, size | `+24` / `+28` | The same getters |
+| Resource fence (stamped when unbound) | `+8` | SetIndices stamps it into the old buffer with the fence from the `+11036` block |
 
 ## The frame's structure (from the code)
 
@@ -152,11 +160,10 @@ With the game in hand (`bash android/build.sh <default.xex>` or
 
 ## Todo
 
-- [ ] The remaining hooks (SetViewport, SetScissorRect, SetStreamSource,
-      SetIndices, SetTexture, the buffer locks, TextureUnlock, FlushCpuRange,
-      NewSegment, SetPredication, QueryIssue, QueryGetData).
-- [ ] The vertex-buffer and texture arrays; the exact tile count/rects and
-      predication-mask offsets (marked confirm above).
+- [ ] The remaining hooks: SetStreamSource, TextureUnlock, FlushCpuRange,
+      QueryIssue, QueryGetData (and confirm the Lock/Unlock pair assignment).
+- [ ] The vertex-buffer array and the sampler filter state; the exact tile
+      count/rects and predication-mask offsets (marked confirm above).
 - [ ] The XDK version from the XEX (recomp-tools' xdkver.mjs) into the profile.
 - [ ] The scene resolve caller for the antialiasing; the aspect-ratio and
       DLAA hooks (step 4 of the checklist) once the trace is clean.
