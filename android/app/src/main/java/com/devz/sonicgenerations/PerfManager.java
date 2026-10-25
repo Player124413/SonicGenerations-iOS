@@ -9,8 +9,9 @@ import android.os.PowerManager;
 /**
  * Android performance glue on the Java side:
  *
- *  * Game Mode (API 33+): request PERFORMANCE so the OS offers the game its
- *    sustained performance profile (thermals, GPU clocks).
+ *  * Game Mode (API 33+): the app reports gameplay state (setGameState) so the
+ *    OS applies its game performance profile; the mode itself is chosen by the
+ *    player in the Game Dashboard.
  *  * Thermal listener (API 29+): the OS reports throttling as it happens;
  *    native (android_perf.cpp) turns it into a live framerate_limit drop
  *    (45 FPS warm, 30 FPS hot) and lifts it when the device cools down -
@@ -50,8 +51,13 @@ public final class PerfManager {
             try {
                 sGameManager = (android.app.GameManager) activity.getSystemService(Activity.GAME_SERVICE);
                 if (sGameManager != null) {
-                    sGameManager.setGameMode(activity.getPackageName(),
-                            android.app.GameManager.GAME_MODE_PERFORMANCE);
+                    // The game mode itself is chosen by the player (Game
+                    // Dashboard); setting it needs MANAGE_GAME_MODE. Report
+                    // gameplay state instead so the system applies whatever
+                    // performance profile is active. Sonic pauses for its own
+                    // menus, so gameplay is interruptible.
+                    sGameManager.setGameState(new android.app.GameState(
+                            false, android.app.GameState.MODE_GAMEPLAY_INTERRUPTIBLE));
                 }
             } catch (Throwable ignored) {
             }
@@ -72,8 +78,8 @@ public final class PerfManager {
     public static void onActivityResumed(Activity activity) {
         if (sGameManager != null) {
             try {
-                sGameManager.setGameMode(activity.getPackageName(),
-                        android.app.GameManager.GAME_MODE_PERFORMANCE);
+                sGameManager.setGameState(new android.app.GameState(
+                        false, android.app.GameState.MODE_GAMEPLAY_INTERRUPTIBLE));
             } catch (Throwable ignored) {
             }
         }

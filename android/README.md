@@ -128,9 +128,10 @@ ports of this SDK - tuned for tile-based mobile GPUs:
 - **Thermal-aware frame cap.** The OS thermal status (Android 10+) drops
   `framerate_limit` live (45 FPS warm, 30 FPS hot) instead of letting the
   phone throttle into a slideshow, and lifts the cap when it cools down.
-- **Game Mode + sustained performance.** The app asks for the OS performance
-  game mode (Android 13+) and the sustained clock profile, keeps the screen
-  on, and runs the guest threads at `nice -10`.
+- **Game Mode + sustained performance.** The app reports gameplay state to the
+  OS game mode service (Android 13+; the mode itself is picked in the Game
+  Dashboard) and requests the sustained clock profile, keeps the screen on,
+  and runs the guest threads at `nice -10`.
 - **Custom GPU drivers (Adreno).** The launcher imports Turnip/Adreno driver
   zips (the Yuzu/Skyline/Dolphin/Winlator format) and the app loads one
   through libadrenotools before the runtime starts - often the single biggest
