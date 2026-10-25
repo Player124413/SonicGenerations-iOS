@@ -3,9 +3,12 @@
 *.xiso
 *.xex
 
-# Code generated from the player's default.xex (run codegen, see README.md).
+# The recompiled game code (generated/default): the original project commits
+# it, so the game builds from a clone with no disc and no codegen run. Your own
+# default.xex still regenerates it in place (run codegen, see README.md).
 generated/*
 !generated/rexglue.cmake
+!generated/default/
 
 out/
 

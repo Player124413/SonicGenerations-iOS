@@ -12,6 +12,9 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 GEN="$HERE/sonicgenerations/generated/default"
+# A previous no-disc build may point this at the shipped game code: take the
+# link out (never its target) before writing the stub.
+[ -L "$GEN" ] && rm "$GEN"
 mkdir -p "$GEN"
 
 cat > "$GEN/sonicgenerations_pch.h" <<'EOF'

@@ -42,10 +42,10 @@ jobs:
           "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" \
             "ndk;27.2.12479018" "cmake;3.31.1"
 
-      - name: Build the APK (smoke, without game content)
+      - name: Build the APK (the shipped game code, no disc needed)
         run: |
           set -o pipefail
-          bash android/build.sh --smoke 2>&1 | tee /tmp/build.log
+          bash android/build.sh 2>&1 | tee /tmp/build.log
 
       # The run log lives on a CDN; surface the failure where the Checks API
       # can see it: the step summary and error annotations.
