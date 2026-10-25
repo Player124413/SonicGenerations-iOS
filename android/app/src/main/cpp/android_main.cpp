@@ -23,6 +23,7 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <jni.h>
+#include <pthread.h>
 #include <signal.h>
 #include <sys/resource.h>
 #include <ucontext.h>
@@ -124,12 +125,20 @@ JavaVM* QueryJavaVm() {
 // Android throws a native crash away (a tombstone the user cannot reach without
 // adb). This writes <logs>/crash.txt from the signal handler with the
 // async-signal-safe subset: signal, fault address, pc, the symbol (sub_XXXXXXXX
-// = the guest function) and module offset of every frame. SetupActivity shows
-// the file on the next launch. The SDK's own handlers run first (write-watch,
-// SEH regions) and chain here only for genuinely unhandled faults.
+// = the guest function) and module offset of every frame, the crashing thread,
+// and the tail of fd 2 (libc's Scudo/FORTIFY/join messages name an abort's
+// reason). SetupActivity shows the file on the next launch. The SDK's own
+// handlers run first (write-watch, SEH regions) and chain here only for
+// genuinely unhandled faults.
 //
 // @added deivid22srk, 2026 - Android port (kept by the Sonic Generations port)
 char g_crash_path[512];
+// libc's own fatal messages ("Scudo ERROR: ...", "invalid pthread_t passed to
+// pthread_join", FORTIFY failures) are written to fd 2 before abort() runs and
+// name the abort's reason - the one thing the backtrace cannot show. fd 2 is
+// redirected here at startup, and the crash handler appends the tail to
+// crash.txt while it is the only thing on the user's screen.
+char g_stderr_path[512];
 // Set by the terminate handler before it abort()s: the signal handler then
 // appends to its report instead of starting a new one.
 volatile sig_atomic_t g_terminate_reported = 0;
@@ -225,6 +234,34 @@ void CrashHandler(int sig, siginfo_t* info, void* uctx) {
       CrashWrite(fd, "\nbacktrace (pc  module+offset  symbol+offset; sub_XXXXXXXX = guest function):\n");
       CrashTrace t{fd, 0};
       _Unwind_Backtrace(CrashUnwind, &t);
+      CrashWrite(fd, "\nthread: tid=");
+      CrashHex(fd, uint64_t(gettid()));
+      {
+        char tname[64] = {0};
+        if (pthread_getname_np(pthread_self(), tname, sizeof(tname)) == 0 && tname[0]) {
+          CrashWrite(fd, " name=");
+          CrashWrite(fd, tname);
+        }
+      }
+      CrashWrite(fd, "\n--- libc messages (stderr tail; Scudo/FORTIFY name the abort) ---\n");
+      if (g_stderr_path[0]) {
+        int efd = open(g_stderr_path, O_RDONLY | O_CLOEXEC);
+        if (efd >= 0) {
+          off_t sz = lseek(efd, 0, SEEK_END);
+          if (sz > 8192) {
+            lseek(efd, sz - 8192, SEEK_SET);
+          } else {
+            lseek(efd, 0, SEEK_SET);
+          }
+          char buf[8192];
+          ssize_t n = read(efd, buf, sizeof(buf));
+          close(efd);
+          if (n > 0) {
+            ssize_t w = write(fd, buf, size_t(n));
+            (void)w;
+          }
+        }
+      }
       CrashWrite(fd, "\n");
       close(fd);
     }
@@ -330,6 +367,21 @@ int RunAndroidApp() {
   // A previous crash.txt is consumed by the launcher; a fresh launch means the
   // user has seen it (or chose to play again) -- start clean.
   std::filesystem::remove(log_dir + "/crash.txt", ec);
+  // libc reports its abort reason (Scudo heap errors, double pthread_join,
+  // FORTIFY) on fd 2 just before raising SIGABRT. Keep those messages: fd 2
+  // goes to /dev/null on release apps, so open the file first and let the
+  // crash handler append its tail to crash.txt.
+  {
+    const std::string stderr_path = log_dir + "/stderr.txt";
+    if (stderr_path.size() < sizeof(g_stderr_path)) {
+      std::memcpy(g_stderr_path, stderr_path.c_str(), stderr_path.size() + 1);
+      int efd = open(stderr_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+      if (efd >= 0) {
+        dup2(efd, 2);
+        if (efd != 2) close(efd);
+      }
+    }
+  }
   InstallCrashReporter(log_dir);
 
   rex::SetAndroidApplicationContext(java_vm, SDL_GetAndroidActivity(), lib_dir.c_str());

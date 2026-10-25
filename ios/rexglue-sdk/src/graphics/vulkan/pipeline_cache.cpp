@@ -453,6 +453,16 @@ void VulkanPipelineCache::InitializeShaderStorage(const std::filesystem::path& c
                    ? (uint64_t(pipeline_storage_told_end) - sizeof(pipeline_storage_file_header)) /
                          sizeof(PipelineStoredDescription)
                    : 0);
+    // A damaged file (a partial write from a run that died) can claim any
+    // count: resize to it and the allocation itself takes the process down
+    // before the per-record hashes below can reject the data. 262144
+    // descriptions is hundreds of times what a title ever writes.
+    if (pipeline_storage_told_count > 262144) {
+      REXGPU_WARN(
+          "VulkanPipelineCache: pipeline storage claims {} descriptions - treating it as corrupt",
+          pipeline_storage_told_count);
+      pipeline_storage_told_count = 0;
+    }
     if (pipeline_storage_told_count &&
         rex::filesystem::Seek(pipeline_storage_file_, int64_t(sizeof(pipeline_storage_file_header)),
                               SEEK_SET)) {
@@ -535,6 +545,13 @@ void VulkanPipelineCache::InitializeShaderStorage(const std::filesystem::path& c
     ucode_dwords.reserve(0xFFFF);
     while (true) {
       if (!fread(&shader_header, sizeof(shader_header), 1, shader_storage_file_)) {
+        break;
+      }
+      // The count is only covered by the hash below, after the read: a damaged
+      // record would make this resize try gigabytes and the allocation itself
+      // aborts the process. The largest real microcode is well under 65535
+      // dwords (the read buffer's own reserve); anything past 1M is corrupt.
+      if (shader_header.ucode_dword_count > 0x100000u) {
         break;
       }
       size_t ucode_byte_count = shader_header.ucode_dword_count * sizeof(uint32_t);

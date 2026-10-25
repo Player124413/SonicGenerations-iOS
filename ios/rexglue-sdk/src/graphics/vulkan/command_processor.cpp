@@ -934,7 +934,12 @@ void main() {
 bool CompileGlslToSpirvInternal(EShLanguage stage, std::string_view source,
                                 std::vector<uint32_t>& spirv_out, std::string& error_out) {
   static std::once_flag glslang_initialize_once;
-  std::call_once(glslang_initialize_once, []() { glslang::InitializeProcess(); });
+  std::call_once(glslang_initialize_once, []() {
+    // Marks the first runtime compile in the log: the startup crash report's
+    // tail tells whether the process died here or later.
+    REXGPU_INFO("glslang: first runtime GLSL->SPIR-V compile, initializing");
+    glslang::InitializeProcess();
+  });
 
   const char* source_c_str = source.data();
   glslang::TShader shader(stage);
