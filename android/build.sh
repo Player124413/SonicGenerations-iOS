@@ -5,8 +5,14 @@
 # and an APK.
 #
 #   bash android/build.sh <default.xex, or the extracted disc folder holding it>
+#   bash android/build.sh --smoke        # CI: build the app layer WITHOUT the game
 #
 #   JOBS   build parallelism (default 2)
+#
+# --smoke skips the game entirely (the generated game code is replaced by a
+# compile stub, see stub_codegen.sh) and signs with a generated ci-release.jks:
+# the APK launches and runs the launcher, it just cannot play. Everything else
+# is the same build path.
 #
 # Needs: macOS or Linux, CMake 3.25+, Ninja, a C++ host compiler, JDK 17 and
 # the Android SDK (ANDROID_HOME; gradle installs the NDK and CMake packages it
@@ -19,10 +25,22 @@ APP="$HERE/sonicgenerations"
 JOBS="${JOBS:-2}"
 case "$JOBS" in ''|*[!0-9]*|0) echo 'JOBS must be a positive integer.' >&2; exit 1;; esac
 
-source_xex="${1:?usage: bash android/build.sh <default.xex or extracted disc folder>}"
-# The disc names it Default.xex.
-[ -d "$source_xex" ] && source_xex="$(find "$source_xex" -maxdepth 1 -iname default.xex | head -n 1)"
-[ -f "$source_xex" ] || { echo "default.xex not found: $source_xex" >&2; exit 1; }
+SMOKE=0
+if [ "${1:-}" = "--smoke" ]; then SMOKE=1; shift; fi
+
+if [ "$SMOKE" = 1 ]; then
+  # CI smoke build: no game content anywhere.
+  bash "$HERE/stub_codegen.sh"
+else
+  source_xex="${1:?usage: bash android/build.sh <default.xex or extracted disc folder> | --smoke}"
+  # The disc names it Default.xex.
+  [ -d "$source_xex" ] && source_xex="$(find "$source_xex" -maxdepth 1 -iname default.xex | head -n 1)"
+  [ -f "$source_xex" ] || { echo "default.xex not found: $source_xex" >&2; exit 1; }
+
+  # The executable is read from android/game_xex/ (ignored by git, never committed).
+  mkdir -p "$HERE/game_xex"
+  cp "$source_xex" "$HERE/game_xex/default.xex"
+fi
 
 for tool in cmake ninja java git; do
   command -v "$tool" >/dev/null || { echo "Required tool missing: $tool" >&2; exit 1; }
@@ -30,32 +48,30 @@ done
 [ -n "${ANDROID_HOME:-}${ANDROID_SDK_ROOT:-}" ] || {
   echo 'Set ANDROID_HOME (or ANDROID_SDK_ROOT) to your Android SDK.' >&2; exit 1; }
 
-# The executable is read from android/game_xex/ (ignored by git, never committed).
-mkdir -p "$HERE/game_xex"
-cp "$source_xex" "$HERE/game_xex/default.xex"
+if [ "$SMOKE" = 0 ]; then
+  # --- host code generator --------------------------------------------------
+  # The rexglue CLI runs on the build machine and emits the game's C++ into
+  # android/sonicgenerations/generated/ (ignored by git; generated per machine).
+  host_preset=""
+  case "$(uname -s)/$(uname -m)" in
+    Darwin/arm64)  host_preset="mac-arm64" ;;
+    Darwin/x86_64) host_preset="mac-amd64" ;;
+    Linux/x86_64)  host_preset="linux-amd64" ;;
+    Linux/aarch64) host_preset="linux-arm64" ;;
+    *) echo "Unsupported build machine: $(uname -s)/$(uname -m)" >&2; exit 1 ;;
+  esac
+  (
+    cd "$SDK"
+    cmake --preset "$host_preset" -DREXGLUE_REGISTER_PACKAGE=OFF -DREXGLUE_ENABLE_TRACY=OFF
+    cmake --build "out/build/$host_preset" --config Release --target rexglue --parallel "$JOBS"
+  )
+  # The SDK colocates binaries under out/<platform>[-<arch>][/<config>].
+  REXGLUE_HOST_TOOL="$(find "$SDK/out/$host_preset" -maxdepth 2 -type f -name rexglue 2>/dev/null | head -n 1)"
+  [ -n "$REXGLUE_HOST_TOOL" ] && [ -x "$REXGLUE_HOST_TOOL" ] || {
+    echo "host rexglue tool not found under $SDK/out/$host_preset" >&2; exit 1; }
 
-# --- host code generator ----------------------------------------------------
-# The rexglue CLI runs on the build machine and emits the game's C++ into
-# android/sonicgenerations/generated/ (ignored by git; generated per machine).
-host_preset=""
-case "$(uname -s)/$(uname -m)" in
-  Darwin/arm64)  host_preset="mac-arm64" ;;
-  Darwin/x86_64) host_preset="mac-amd64" ;;
-  Linux/x86_64)  host_preset="linux-amd64" ;;
-  Linux/aarch64) host_preset="linux-arm64" ;;
-  *) echo "Unsupported build machine: $(uname -s)/$(uname -m)" >&2; exit 1 ;;
-esac
-(
-  cd "$SDK"
-  cmake --preset "$host_preset" -DREXGLUE_REGISTER_PACKAGE=OFF -DREXGLUE_ENABLE_TRACY=OFF
-  cmake --build "out/build/$host_preset" --config Release --target rexglue --parallel "$JOBS"
-)
-# The SDK colocates binaries under out/<platform>[-<arch>][/<config>].
-REXGLUE_HOST_TOOL="$(find "$SDK/out/$host_preset" -maxdepth 2 -type f -name rexglue 2>/dev/null | head -n 1)"
-[ -n "$REXGLUE_HOST_TOOL" ] && [ -x "$REXGLUE_HOST_TOOL" ] || {
-  echo "host rexglue tool not found under $SDK/out/$host_preset" >&2; exit 1; }
-
-( cd "$APP" && "$REXGLUE_HOST_TOOL" codegen sonicgenerations_manifest.toml )
+  ( cd "$APP" && "$REXGLUE_HOST_TOOL" codegen sonicgenerations_manifest.toml )
+fi
 
 # --- SDL3 Java glue ---------------------------------------------------------
 # Staged from the SDK's own SDL checkout (kept out of git; rebuilds are cheap).
@@ -82,15 +98,30 @@ if [ ! -f "$AT_DIR/CMakeLists.txt" ]; then
 fi
 
 # --- the APK ----------------------------------------------------------------
+if [ "$SMOKE" = 1 ] && [ ! -f "$HERE/ci-release.jks" ]; then
+  # A deterministic CI keystore (the gradle build signs with it when present):
+  # the APK installs and updates over itself. It guards nothing - smoke builds
+  # contain no game content, so there is nothing to protect.
+  keytool -genkeypair -v -keystore "$HERE/ci-release.jks" -alias rexauto \
+    -keyalg RSA -keysize 2048 -validity 10000 \
+    -storepass rexauto -keypass rexauto -dname "CN=rexauto" >/dev/null
+  echo "[android] generated ci-release.jks"
+fi
 (
   cd "$HERE"
   ./gradlew --no-daemon assembleRelease
 )
-apk="$HERE/app/build/outputs/apk/release/app-release-unsigned.apk"
+apk="$HERE/app/build/outputs/apk/release/app-release.apk"
+[ -f "$apk" ] || apk="$HERE/app/build/outputs/apk/release/app-release-unsigned.apk"
 [ -f "$apk" ] || apk="$(find "$HERE/app/build/outputs/apk" -name '*.apk' | head -n 1)"
 [ -n "$apk" ] && [ -f "$apk" ] || { echo "gradle produced no APK" >&2; exit 1; }
 mkdir -p "$HERE/out"
 cp "$apk" "$HERE/out/Sonic-Generations-Android.apk"
 echo "APK ready: $HERE/out/Sonic-Generations-Android.apk"
-echo "Install it with adb install (it is unsigned unless android/ci-release.jks exists;"
-echo "for other tools sign it like any release APK)."
+if [ "$SMOKE" = 1 ]; then
+  echo "This is a smoke APK (signed with ci-release.jks): the launcher runs, the"
+  echo "game does not - build with your own default.xex to play."
+else
+  echo "Install it with adb install (it is unsigned unless android/ci-release.jks"
+  echo "exists; for other tools sign it like any release APK)."
+fi

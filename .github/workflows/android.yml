@@ -1,0 +1,51 @@
+# Sonic Generations for Android - builds the APK on every push.
+#
+# Smoke build: no game content (nothing copyrighted in CI, nothing to upload):
+# the game code that normally comes from the player's default.xex is replaced
+# by a compile stub (android/stub_codegen.sh). This validates the launcher,
+# the shared SDK tree, the JNI layer and the whole Gradle/CMake wiring end to
+# end, and produces an installable APK (the launcher runs; playing needs a
+# real build with your own disc - see android/README.md).
+name: Android APK
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+
+      - name: Install Android SDK packages
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          # Licenses are pre-accepted on runners; `yes` exits 141 (SIGPIPE)
+          # under pipefail when sdkmanager stops reading - not a failure.
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" \
+            "ndk;27.2.12479018" "cmake;3.31.1"
+
+      - name: Build the APK (smoke, without game content)
+        run: bash android/build.sh --smoke
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sonic-Generations-Android
+          path: android/out/Sonic-Generations-Android.apk
+          if-no-files-found: error

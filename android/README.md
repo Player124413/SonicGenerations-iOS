@@ -160,8 +160,12 @@ generated from *your* `default.xex` and never committed), stages SDL's Java
 glue, clones libadrenotools (pinned), and builds
 `android/out/Sonic-Generations-Android.apk` with Gradle.
 
-To build without the game (e.g. for a CI smoke test of the app layer), point
-`android/sonicgenerations/generated/default` at an existing codegen output.
+To build without the game (a compile check of the app layer, and what CI
+runs), use `bash android/build.sh --smoke`: the generated game code is
+replaced by a stub (`android/stub_codegen.sh`), the APK launches and runs the
+launcher but cannot play. The `Android APK` GitHub Actions workflow
+(`.github/workflows/android.yml`) builds exactly that smoke APK on every
+push and attaches it to the run as an artifact.
 
 ## Device tools
 
