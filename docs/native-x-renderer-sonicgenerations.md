@@ -149,8 +149,12 @@ from the trace's "from" lines (see below).
 
 ## Verifying (step 3 of integrating-a-game.md)
 
-With the game in hand (`bash android/build.sh <default.xex>` or
-`bash ios/build.sh <default.xex>`):
+A build needs no disc: the recompiled game code ships in
+`ios/sonicgenerations/generated/default` (as the original project commits it),
+so `bash android/build.sh` or `bash ios/build.sh` build the game as cloned.
+With your own `default.xex` the same commands regenerate it first
+(`bash android/build.sh <default.xex>`); the CI artifact
+(Sonic-Generations-Android) is the full APK, built the no-disc way.
 
 1. `--native_x_renderer_trace=true`, F9 for a frame dump,
    `python native_x_renderer/tools/frame_trace.py <log>`: check the call
