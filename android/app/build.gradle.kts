@@ -41,7 +41,18 @@ android {
         externalNativeBuild {
             cmake {
                 arguments += listOf(
-                    "-DANDROID_STL=c++_static",
+                    // c++_shared, not c++_static: the app is several shared
+                    // libraries (main, the runtime, the GPU plugin,
+                    // NativeXRenderer), and a static libc++ gives each its own
+                    // copy of the C++ runtime - different std::locale facet
+                    // ids, one std::set_terminate the others never see, string
+                    // and stream state split across copies. That is a lottery
+                    // of std::bad_cast and allocator aborts whenever a stream
+                    // or a locale crosses a library line (the first shader
+                    // parse's std::istringstream drew the short straw).
+                    // One libc++_shared.so for the process is the NDK's
+                    // documented answer for multiple .so apps.
+                    "-DANDROID_STL=c++_shared",
                     "-DCMAKE_BUILD_TYPE=Release",
                     "-DREXSDK_DIR=$rexSdkDir",
                     "-DREX_PORT_DIR=$rexPortDir",
