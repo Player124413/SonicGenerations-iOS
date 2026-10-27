@@ -78,10 +78,13 @@ NATIVE_X_RENDERER_HOOK(82DB1D18, SetPixelShader)
 NATIVE_X_RENDERER_HOOK(82DB2138, SetVertexDeclaration)
 NATIVE_X_RENDERER_HOOK(82DB1B30, SetVertexShaderConstantF)
 NATIVE_X_RENDERER_HOOK(82DB1C08, SetPixelShaderConstantF)
-// SetShaderGPRAllocation (flags, vertexGprs, pixelGprs): writes +24376 and
-// runs the prebuilt one-point draws (sub_82DC3178/82DC3690's allocator at
-// +24384/+24388).
-NATIVE_X_RENDERER_HOOK(82DB11C0, SetShaderGPRAllocation)
+// 0x82DB11C0 was mapped to SetShaderGPRAllocation (it writes +24376 and
+// runs the prebuilt one-point draws, sub_82DC3178/82DC3690's allocator at
+// +24384/+24388), but its body is the library's object factory: it
+// allocates the 24704-byte device, ignores r3 (the callers pass 0), takes
+// its mode in r4 and returns the new object through r8. Hooked as a device
+// call it handed the tracker a device of 0 and crashed it; the call is not
+// draw state and stays unhooked.
 
 // Resources. SetTexture copies the texture's fetch constant (object +28) into
 // the sampler's register; SetIndices writes +12788 and stamps the fence

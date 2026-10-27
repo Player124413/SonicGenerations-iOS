@@ -51,6 +51,12 @@ if ! grep -q "NativeWindow window{native_window}" "$NXR_DIR/src/device.cpp" 2>/d
     || { echo "[ios] native_x_renderer patch failed" >&2; exit 1; }
   echo "[ios] native_x_renderer: window patch applied"
 fi
+NXR_GUARD_PATCH="$HERE/../android/patches/native_x_renderer-null-device-guard.patch"
+if ! grep -q "mislabeled hook, skipped" "$NXR_DIR/src/state.cpp" 2>/dev/null; then
+  patch -d "$NXR_DIR" -p1 --forward --batch < "$NXR_GUARD_PATCH" \
+    || { echo "[ios] native_x_renderer guard patch failed" >&2; exit 1; }
+  echo "[ios] native_x_renderer: null-device guard patched in"
+fi
 
 # The executable is read from ios/game_xex/ (ignored by git, never committed).
 if [ -n "$source_xex" ]; then

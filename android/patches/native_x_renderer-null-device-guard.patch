@@ -1,0 +1,38 @@
+NativeXRenderer: skip a device call that arrives without a device.
+
+The call table marks a call's first argument as the D3D device ("dev") and
+the state tracker reads device state through it. A hook mapped to such a
+call that is really another function can pass no device at all: the game's
+device factory at 0x82DB11C0 ignores r3 and its callers pass 0 (Sonic
+Generations maps it to SetShaderGPRAllocation). The tracker then reads
+device state at guest address 0 and crashes the game.
+
+Skip such calls with one warning naming the hook instead: a call without a
+device cannot be tracked, and it is not draw state. The submodule stays
+pristine: this patch is applied to its working tree at build time
+(android/build.sh, ios/build.sh), like native_x_renderer-android-window.patch.
+
+diff --git a/src/state.cpp b/src/state.cpp
+index d795b50..d5f89a3 100644
+--- a/src/state.cpp
++++ b/src/state.cpp
+@@ -295,6 +295,19 @@ void StateTracker::Enter(Call call, uint32_t device, const uint8_t* base, bool n
+     return;
+   }
+   bool device_call = Info(call).device;
++  // A call the table says carries the D3D device in r3, called without one: the hook is mapped to a
++  // function with other arguments (Sonic Generations maps its device factory at 0x82DB11C0 to
++  // SetShaderGPRAllocation; the factory ignores r3 and its callers pass 0). Tracking would read device
++  // state at guest address 0 and crash the game, so skip such calls (the one warning names the hook).
++  if (device_call && device == 0) {
++    static bool warned = false;
++    if (!warned) {
++      warned = true;
++      REXLOG_WARN("[native_x_renderer] {} was called without a device: mislabeled hook, skipped",
++                  Info(call).name);
++    }
++    return;
++  }
+   if (!device_call && !((Info(call).flags & kPackets) && last_device_)) return;
+   if (device_call) last_device_ = device;
+   device = device_call ? device : last_device_;

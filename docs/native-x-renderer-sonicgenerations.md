@@ -43,7 +43,6 @@ Hooked in `src/native_x_renderer_sonicgenerations.cpp`. Evidence in brackets.
 | Shaders | SetVertexDeclaration | `82DB2138` | 5 ins; writes `+12216` and the +16 mask |
 | Constants | SetVertexShaderConstantF | `82DB1B30` | 54 ins; writes the +0 mask (VS constants dirty); engine `0x83219B48` |
 | Constants | SetPixelShaderConstantF | `82DB1C08` | 54 ins; writes the +8 mask; engine `0x8321AB30` |
-| Misc | SetShaderGPRAllocation | `82DB11C0` | 53 ins; writes `+24376` and runs the prebuilt one-point draws (`82DC3178`/`82DC3690`, allocator `+24384`/`+24388`) |
 | Resources | SetTexture | `82DABA20` | 57 ins; (sampler, texture): copies the texture's fetch constant (object `+28`..`+52`) into the sampler's register, kicks if needed; engine `0x82E27350`, `0x82E254D8` |
 | Resources | SetIndices | `82DAAB08` | 36 ins; writes the index buffer pointer at `+12788` and stamps the fence (from the block `+11036` points to) into the unbound buffer's `+8`; 10 engine call sites |
 | Resources | Vertex buffer Lock / Unlock | `82DB0828` / `82DAF710` | Lock: 20 ins, waits on the buffer's fence through `82DB04B8` (base/size at object `+24`/`+28`); Unlock: 4 ins tail-call flushing the CPU range (`82DAF300`); 17 call sites each |
@@ -64,8 +63,17 @@ FlushCpuRange, QueryIssue and QueryGetData (the query machinery at
 RB_COLOR_MASK, PA_SU_*, SQ_WRAPPING_*, ... - the observer reads the shadow
 they write, so they need no hooks). `82DB0D38`, a SetPredication candidate,
 turned out to be the device's Release (atomic decrement of the refcount at
-`+60`). A missing hook shows up in the trace as a call or packets "written
-outside any hooked call".
+`+60`). `82DB11C0`, mapped to SetShaderGPRAllocation (it writes `+24376` and
+runs the prebuilt one-point draws, `82DC3178`/`82DC3690`, allocator
+`+24384`/`+24388`), is the library's object factory: it allocates the
+24704-byte device, ignores r3 (the callers pass 0), takes its mode in r4 and
+returns the new object through r8. Hooked as a device call it handed the
+tracker a device of 0 and crashed it (first crash of the native renderer:
+"read of guest 0x00000030" in StateTracker::Enter), so it stays unhooked -
+it is not draw state - and the tracker's null-device guard
+(`android/patches/native_x_renderer-null-device-guard.patch`) skips any
+mislabeled hook of the same kind instead of crashing. A missing hook shows
+up in the trace as a call or packets "written outside any hooked call".
 
 ## The device layout
 
@@ -105,7 +113,7 @@ the setters, the tiling/clear/swap paths). The head matches Dante's Inferno
 | Inline draw end | `+13828` | BeginVertices saves the packet end here; EndVertices copies it into +48 |
 | D3DRS_PRESENTINTERVAL | `+13984` | Swap converts it to a vblank count (the 60 FPS hook at `0x82DC44E0`) |
 | Swap/vblank state | `+12260`, `+13912`/`+13916`, `+15300`… | Swap/Present counters |
-| Prebuilt draws | `+24376`, `+24384`/`+24388`/`+24392` | SetShaderGPRAllocation's one-point draws |
+| Prebuilt draws | `+24376`, `+24384`/`+24388`/`+24392` | The device factory's (`82DB11C0`, unhooked) one-point draws |
 | Per-stream fetch stride/format bytes | `+10864 + stream`, `+10890 + stream` | The fetch-patch pair reads them (`82DA9E60` family) |
 
 Still to place: the vertex-buffer array, the texture object array and the

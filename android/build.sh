@@ -131,6 +131,14 @@ if ! grep -q "NativeWindow window{native_window}" "$NXR_DIR/src/device.cpp" 2>/d
     || { echo "[android] native_x_renderer patch failed" >&2; exit 1; }
   echo "[android] native_x_renderer: Android swap chain patched in"
 fi
+# A hook mapped to a device call can arrive without a device (a mislabeled hook), and the state
+# tracker would read device state at guest address 0 and crash the game; the guard skips such calls.
+NXR_GUARD_PATCH="$ROOT/android/patches/native_x_renderer-null-device-guard.patch"
+if ! grep -q "mislabeled hook, skipped" "$NXR_DIR/src/state.cpp" 2>/dev/null; then
+  patch -d "$NXR_DIR" -p1 --forward --batch < "$NXR_GUARD_PATCH" \
+    || { echo "[android] native_x_renderer guard patch failed" >&2; exit 1; }
+  echo "[android] native_x_renderer: null-device guard patched in"
+fi
 
 # --- the APK ----------------------------------------------------------------
 if [ ! -f "$HERE/ci-release.jks" ]; then
