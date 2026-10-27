@@ -17,9 +17,17 @@
         android:name="android.hardware.touchscreen"
         android:required="false" />
 
-    <!-- Android 12+: declare game mode support so performance mode is offered. -->
+    <!-- Android 12+: declare game mode support so performance mode is offered.
+         allowNativeHeapPointerTagging=false: bionic tags every heap pointer's
+         top byte and aborts in free() when the tag is gone ("Pointer tag for
+         0x... was truncated") - somewhere in the guest/host pointer traffic a
+         heap pointer loses its tag. The platform's remedy for software that
+         moves pointers through byte-level formats is the one the abort
+         message's tagged-pointers documentation gives: run the heap untagged.
+         Nothing here relies on tags. -->
     <application
         android:allowBackup="false"
+        android:allowNativeHeapPointerTagging="false"
         android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
